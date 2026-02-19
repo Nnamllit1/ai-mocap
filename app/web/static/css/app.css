@@ -29,8 +29,10 @@ body {
   gap: 0.8rem;
   align-items: center;
   justify-content: space-between;
-  padding: 0.8rem 1rem;
-  background: #0d2239;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, #0b1d33 0%, #153256 100%);
+  border-bottom: 1px solid rgba(184, 209, 235, 0.25);
+  box-shadow: 0 8px 18px rgba(5, 16, 30, 0.28);
   color: #fff;
   position: sticky;
   top: 0;
@@ -39,24 +41,55 @@ body {
 
 .brand h1 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.08rem;
+  letter-spacing: 0.2px;
 }
 
 .brand p {
   margin: 0;
-  color: #a9c3e1;
+  color: #b8d1eb;
   font-size: 0.8rem;
 }
 
 .desktop-nav {
   display: flex;
-  gap: 0.8rem;
+  gap: 0.45rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .desktop-nav a {
-  color: #c9e2ff;
+  color: #d6e9ff;
   text-decoration: none;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 0.45rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 197, 228, 0.25);
+  background: rgba(17, 40, 66, 0.46);
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.desktop-nav a:hover {
+  background: rgba(40, 86, 136, 0.62);
+  border-color: rgba(195, 221, 246, 0.55);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.desktop-nav a:focus-visible {
+  outline: 2px solid #9cc9ff;
+  outline-offset: 2px;
+}
+
+.desktop-nav a[href="/logout"] {
+  border-color: rgba(241, 179, 179, 0.42);
+  background: rgba(96, 30, 30, 0.42);
+}
+
+.desktop-nav a[href="/logout"]:hover {
+  background: rgba(142, 37, 37, 0.55);
+  border-color: rgba(252, 208, 208, 0.72);
 }
 
 .content {
@@ -169,6 +202,17 @@ th, td {
   border: 1px solid #cdd9e8;
   border-radius: 8px;
   background: #f0f3f7;
+}
+
+#pose3d-canvas,
+#recording-pose3d-canvas {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid #27364a;
+  border-radius: 8px;
+  background: #0d1117;
 }
 
 .login-page {
@@ -359,10 +403,11 @@ video {
 
 @media (max-width: 1024px) {
   .desktop-nav {
-    gap: 0.5rem;
+    gap: 0.35rem;
   }
   .desktop-nav a {
-    font-size: 0.84rem;
+    font-size: 0.8rem;
+    padding: 0.4rem 0.62rem;
   }
 }
 
