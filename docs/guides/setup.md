@@ -7,7 +7,7 @@ Use this checklist for first-time portal setup.
    - `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`
 2. Configure server token and settings:
    - Edit `configs/default.yaml`
-   - Set `server.token` to your chosen value.
+   - Set `server.token` to your chosen value. (The default is `1234`.)
 3. Start the application:
    - `.\scripts\run_dev.ps1`
 4. Open login page:
