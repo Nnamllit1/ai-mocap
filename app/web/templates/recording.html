@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="grid">
+  <article class="card">
+    <h2>Recording Controls</h2>
+    <div id="recording-status" class="diag-grid" data-token="{{ token }}">
+      <span class="diag-pill">state: idle</span>
+      <span class="diag-pill">clip: n/a</span>
+      <span class="diag-pill">elapsed: 0.0 s</span>
+      <span class="diag-pill">frames: 0</span>
+      <span class="diag-pill">samples: 0</span>
+    </div>
+    <div class="actions">
+      <button id="recording-start">Start Recording</button>
+      <button id="recording-stop">Stop Recording</button>
+    </div>
+    <p id="recording-note" class="muted"></p>
+  </article>
+
+  <article class="card">
+    <h2>3D Wireframe Preview</h2>
+    <canvas id="recording-pose3d-canvas" width="720" height="420" data-token="{{ token }}"></canvas>
+  </article>
+
+  <article class="card">
+    <h2>Camera Snapshots</h2>
+    <div class="cams" id="recording-cam-grid" data-token="{{ token }}" data-cameras='{{ cameras|tojson }}'></div>
+  </article>
+
+  <article class="card">
+    <h2>Clip History</h2>
+    <div id="clip-history" data-token="{{ token }}"></div>
+  </article>
+</section>
+<script src="/static/js/recording.js"></script>
+{% endblock %}

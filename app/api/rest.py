@@ -8,7 +8,6 @@ from fastapi.responses import Response
 
 from app.api.auth import require_http_token
 from app.core.constants import COCO_JOINTS
-from app.core.offline import OfflineProcessor
 from app.services.checkerboard_pdf import CheckerboardSpec, generate_checkerboard_pdf
 from app.models.api import (
     CalibrationStartRequest,
@@ -325,6 +324,7 @@ def preview_pose3d(request: Request):
         "schema": "coco17",
         "joint_names": COCO_JOINTS,
         "confidences": status.get("last_joint_confidences", {}),
+        "joint_states": status.get("last_joint_states", {}),
         "metrics": {
             "valid_joints": status.get("valid_joints", 0),
             "active_cameras": status.get("active_cameras", 0),
@@ -335,6 +335,50 @@ def preview_pose3d(request: Request):
             "dropped_cycles": status.get("dropped_cycles", 0),
         },
     }
+
+
+@router.get("/recordings/status")
+def recordings_status(request: Request):
+    runtime = _runtime(request)
+    require_http_token(request, runtime.config_store.config.server.token)
+    return runtime.recording_manager.status()
+
+
+@router.post("/recordings/start")
+def recordings_start(request: Request):
+    runtime = _runtime(request)
+    require_http_token(request, runtime.config_store.config.server.token)
+    active = runtime.session_manager.status().get("active_cameras", 0)
+    out = runtime.recording_manager.start(active_cameras=active)
+    if int(active) <= 0:
+        out["warning"] = "recording_with_0_active_cameras"
+    return out
+
+
+@router.post("/recordings/stop")
+def recordings_stop(request: Request):
+    runtime = _runtime(request)
+    require_http_token(request, runtime.config_store.config.server.token)
+    return runtime.recording_manager.stop()
+
+
+@router.get("/recordings")
+def recordings_list(request: Request):
+    runtime = _runtime(request)
+    require_http_token(request, runtime.config_store.config.server.token)
+    return runtime.recording_manager.list_clips()
+
+
+@router.post("/recordings/{clip_id}/export")
+def recordings_export(request: Request, clip_id: str):
+    runtime = _runtime(request)
+    require_http_token(request, runtime.config_store.config.server.token)
+    try:
+        return runtime.recording_manager.export_clip(clip_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc.args[0])) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc.args[0])) from exc
 
 
 @router.get("/preview/camera/{camera_id}")
@@ -351,5 +395,7 @@ def preview_camera(request: Request, camera_id: str):
 def offline_export_placeholder(request: Request):
     runtime = _runtime(request)
     require_http_token(request, runtime.config_store.config.server.token)
+    from app.core.offline import OfflineProcessor
+
     processor = OfflineProcessor(runtime.config_store.config)
     return processor.run_export()

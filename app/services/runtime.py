@@ -10,6 +10,7 @@ from app.core.session import SessionManager
 from app.services.camera_registry import CameraRegistry
 from app.services.config_store import ConfigStore
 from app.services.join_invites import JoinInviteService
+from app.services.recording_manager import RecordingManager
 
 
 @dataclass
@@ -21,6 +22,7 @@ class RuntimeContext:
     event_bus: EventBus
     camera_registry: CameraRegistry
     join_invites: JoinInviteService
+    recording_manager: RecordingManager
 
 
 def build_runtime(config_path: Path) -> RuntimeContext:
@@ -29,7 +31,8 @@ def build_runtime(config_path: Path) -> RuntimeContext:
     event_bus = EventBus()
     capture_hub = CaptureHub(cfg.ingest.heartbeat_timeout_s)
     calibration_service = CalibrationService(cfg, capture_hub)
-    session_manager = SessionManager(cfg, capture_hub, event_bus)
+    recording_manager = RecordingManager()
+    session_manager = SessionManager(cfg, capture_hub, event_bus, recording_manager)
     camera_registry = CameraRegistry()
     join_invites = JoinInviteService(default_ttl_s=120)
     return RuntimeContext(
@@ -40,4 +43,5 @@ def build_runtime(config_path: Path) -> RuntimeContext:
         event_bus=event_bus,
         camera_registry=camera_registry,
         join_invites=join_invites,
+        recording_manager=recording_manager,
     )

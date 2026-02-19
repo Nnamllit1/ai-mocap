@@ -16,11 +16,19 @@
     };
     if (body) opts.body = JSON.stringify(body);
     const resp = await fetch(path, opts);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `${path}: ${resp.status}`);
+    }
     return await resp.json();
   }
 
   async function get(path) {
     const resp = await fetch(path, { headers: { "x-access-token": token } });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `${path}: ${resp.status}`);
+    }
     return await resp.json();
   }
 
@@ -60,8 +68,15 @@
     captureBtn.disabled = !data.all_cameras_ready;
   }
 
+  function extractScorePayload(data) {
+    if (!data || typeof data !== "object") return null;
+    if (data.calibration_score) return data.calibration_score; // /api/calibration/solve response
+    if (data.result?.calibration_score) return data.result.calibration_score; // /api/calibration/report response
+    return null;
+  }
+
   function renderScore(data) {
-    const score = data?.result?.calibration_score;
+    const score = extractScorePayload(data);
     if (!score) {
       scoreHead.textContent = "Run solve to generate a score.";
       scoreTips.innerHTML = "";
@@ -79,13 +94,22 @@
   }
 
   async function refreshReadiness() {
-    const data = await get("/api/calibration/readiness");
-    renderReadiness(data);
+    try {
+      const data = await get("/api/calibration/readiness");
+      renderReadiness(data);
+    } catch (err) {
+      globalReadiness.textContent = String(err.message || err);
+    }
   }
 
   async function refreshScore() {
-    const data = await get("/api/calibration/report");
-    renderScore(data);
+    try {
+      const data = await get("/api/calibration/report");
+      renderScore(data);
+    } catch (err) {
+      scoreHead.textContent = String(err.message || err);
+      scoreTips.innerHTML = "";
+    }
   }
 
   document.getElementById("cal-start")?.addEventListener("click", async () => {
@@ -118,10 +142,16 @@
   });
 
   document.getElementById("cal-solve")?.addEventListener("click", async () => {
-    const data = await post("/api/calibration/solve");
-    output.textContent = JSON.stringify(data, null, 2);
-    await refreshReadiness();
-    await refreshScore();
+    try {
+      const data = await post("/api/calibration/solve");
+      output.textContent = JSON.stringify(data, null, 2);
+      // Show score/tips immediately from solve response.
+      renderScore(data);
+      await refreshReadiness();
+      await refreshScore();
+    } catch (err) {
+      output.textContent = JSON.stringify({ ok: false, error: String(err.message || err) }, null, 2);
+    }
   });
 
   setInterval(refreshReadiness, 900);

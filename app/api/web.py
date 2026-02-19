@@ -127,6 +127,23 @@ def preview_page(request: Request):
     )
 
 
+@router.get("/recording", response_class=HTMLResponse)
+def recording_page(request: Request):
+    guard = _require_or_redirect(request)
+    if guard:
+        return guard
+    token = resolve_token_from_request(request)
+    return _templates(request).TemplateResponse(
+        request,
+        "recording.html",
+        {
+            "title": "Recording",
+            "token": token,
+            "cameras": request.app.state.runtime.camera_registry.list_records(),
+        },
+    )
+
+
 @router.get("/join", response_class=HTMLResponse)
 def join_page(request: Request):
     ticket = request.query_params.get("ticket", "")

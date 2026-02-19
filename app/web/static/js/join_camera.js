@@ -13,6 +13,7 @@
 
   const video = document.getElementById("video");
   const statusEl = document.getElementById("ws-status");
+  const recordingHintEl = document.getElementById("recording-hint");
   const startBtn = document.getElementById("start-btn");
   const stopBtn = document.getElementById("stop-btn");
   const retryBtn = document.getElementById("retry-btn");
@@ -263,6 +264,9 @@
     ws.binaryType = "arraybuffer";
     ws.onopen = () => {
       setState(STATES.STREAMING, assignedCameraId || "connected");
+      if (recordingHintEl) {
+        recordingHintEl.textContent = "Camera is streaming. Use the admin Recording tab to control capture and export.";
+      }
       const fps = Math.max(1, Number(fpsInput.value || 15));
       const quality = Math.max(30, Math.min(95, Number(qualityInput.value || 70))) / 100;
       timer = setInterval(() => {

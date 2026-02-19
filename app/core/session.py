@@ -11,6 +11,7 @@ import numpy as np
 from app.core.capture import CaptureHub
 from app.core.constants import COCO_JOINTS
 from app.core.events import EventBus, Pose3DEvent, SessionStatusEvent
+from app.core.joint_tracking import JointStateTracker
 from app.core.osc import BlenderOscSink
 from app.core.pose import PoseEstimator
 from app.core.smoothing import JointSmoother
@@ -18,6 +19,7 @@ from app.core.triangulation import TriangulationEngine
 from app.models.config import AppConfig
 from app.services.calibration_store import CalibrationStore
 from app.services.export_manager import ExportManager
+from app.services.recording_manager import RecordingManager
 
 
 @dataclass
@@ -34,13 +36,21 @@ class SessionState:
     dropped_cycles: int = 0
     last_active_camera_ids: list[str] = field(default_factory=list)
     joint_conf_avg: float | None = None
+    last_joint_states: dict = field(default_factory=dict)
 
 
 class SessionManager:
-    def __init__(self, cfg: AppConfig, capture_hub: CaptureHub, event_bus: EventBus):
+    def __init__(
+        self,
+        cfg: AppConfig,
+        capture_hub: CaptureHub,
+        event_bus: EventBus,
+        recording_manager: RecordingManager,
+    ):
         self.cfg = cfg
         self.capture_hub = capture_hub
         self.event_bus = event_bus
+        self.recording_manager = recording_manager
         self.state = SessionState()
         self._thread: Optional[threading.Thread] = None
         self._stop_evt = threading.Event()
@@ -110,6 +120,7 @@ class SessionManager:
             "dropped_cycles": self.state.dropped_cycles,
             "last_active_camera_ids": self.state.last_active_camera_ids,
             "joint_conf_avg": self.state.joint_conf_avg,
+            "last_joint_states": self.state.last_joint_states,
         }
 
     def _run_loop(self) -> None:
@@ -118,6 +129,7 @@ class SessionManager:
             triangulator = TriangulationEngine(calibration, self.cfg.triangulation)
             estimator = PoseEstimator(self.cfg.model)
             smoother = JointSmoother(self.cfg.runtime.ema_alpha)
+            state_tracker = JointStateTracker(self.cfg.runtime.missing_joint_hold_ms)
             osc_sink = BlenderOscSink(self.cfg.osc)
             exporter = ExportManager(self.cfg.export)
             target_dt = 1.0 / max(self.cfg.runtime.target_fps, 1)
@@ -159,35 +171,69 @@ class SessionManager:
                     conf = float(np.mean([item[2] for item in obs.values()])) if obs else 0.0
                     joint_confidences[joint_idx] = conf
 
-                self._emit_joints_to_sinks(osc_sink, pose3d, joint_confidences, timestamp)
+                joint_states = state_tracker.stabilize(timestamp, pose3d, joint_confidences)
+                stable_pose3d = {
+                    idx: np.array(entry["xyz"], dtype=float)
+                    for idx, entry in joint_states.items()
+                }
+                stable_confidences = {
+                    idx: float(entry["confidence"]) for idx, entry in joint_states.items()
+                }
+
+                self._emit_joints_to_sinks(osc_sink, stable_pose3d, stable_confidences, timestamp)
                 self._emit_status_to_sinks(
-                    osc_sink, active_cameras=len(frames), valid_joints=len(pose3d)
+                    osc_sink, active_cameras=len(frames), valid_joints=len(stable_pose3d)
                 )
-                if self.cfg.export.enable_live_export and pose3d:
-                    exporter.append(timestamp, pose3d)
+                if self.cfg.export.enable_live_export and stable_pose3d:
+                    exporter.append(timestamp, stable_pose3d)
+                self.recording_manager.append_frame(
+                    timestamp=timestamp,
+                    joint_states=joint_states,
+                    metrics={
+                        "active_cameras": len(frames),
+                        "valid_joints": len(stable_pose3d),
+                    },
+                )
 
                 serial = {
-                    str(idx): [float(v[0]), float(v[1]), float(v[2])] for idx, v in pose3d.items()
+                    str(idx): [float(v[0]), float(v[1]), float(v[2])]
+                    for idx, v in stable_pose3d.items()
                 }
-                serial_conf = {str(idx): float(val) for idx, val in joint_confidences.items()}
+                serial_conf = {str(idx): float(val) for idx, val in stable_confidences.items()}
+                serial_states = {
+                    str(idx): {
+                        "xyz": [
+                            float(entry["xyz"][0]),
+                            float(entry["xyz"][1]),
+                            float(entry["xyz"][2]),
+                        ],
+                        "confidence": float(entry["confidence"]),
+                        "state": str(entry["state"]),
+                        "age_ms": int(entry["age_ms"]),
+                    }
+                    for idx, entry in joint_states.items()
+                }
                 self.state.last_pose3d = serial
                 self.state.last_joint_confidences = serial_conf
+                self.state.last_joint_states = serial_states
                 self.state.last_timestamp = timestamp
                 self.state.active_cameras = len(frames)
-                self.state.valid_joints = len(pose3d)
+                self.state.valid_joints = len(stable_pose3d)
                 self.state.joint_conf_avg = (
-                    float(np.mean(list(joint_confidences.values())))
-                    if joint_confidences
+                    float(np.mean(list(stable_confidences.values())))
+                    if stable_confidences
                     else None
                 )
 
-                self.event_bus.publish("pose3d", Pose3DEvent(timestamp=timestamp, joints=pose3d))
+                self.event_bus.publish(
+                    "pose3d", Pose3DEvent(timestamp=timestamp, joints=stable_pose3d)
+                )
                 self.event_bus.publish(
                     "status",
                     SessionStatusEvent(
                         running=True,
                         active_cameras=len(frames),
-                        valid_joints=len(pose3d),
+                        valid_joints=len(stable_pose3d),
                         message="running",
                     ),
                 )

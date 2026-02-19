@@ -24,6 +24,7 @@ class RuntimeConfig(BaseModel):
     max_latency_ms: int = 120
     ema_alpha: float = 0.6
     show_preview: bool = True
+    missing_joint_hold_ms: int = 250
 
 
 class TriangulationConfig(BaseModel):
