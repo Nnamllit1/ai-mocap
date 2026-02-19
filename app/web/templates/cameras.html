@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <h2>Camera Roster</h2>
+  <p>Rename, disable, or remove registered devices.</p>
+  <div id="camera-roster" data-token="{{ token }}" data-initial='{{ cameras|tojson }}'></div>
+</article>
+<script src="/static/js/cameras.js"></script>
+{% endblock %}

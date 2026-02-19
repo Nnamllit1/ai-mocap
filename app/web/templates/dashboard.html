@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="grid">
+  <article class="card">
+    <h2>Session</h2>
+    <div id="session-status"
+         data-token="{{ token }}"
+         data-status='{{ status|tojson }}'></div>
+    <div class="actions">
+      <button id="start-session">Start</button>
+      <button id="stop-session">Stop</button>
+    </div>
+  </article>
+  <article class="card">
+    <h2>Add Camera</h2>
+    <p>Create a short-lived invite and open the link or QR on a phone.</p>
+    <div class="inline">
+      <label>TTL (s) <input id="invite-ttl" type="number" value="120"></label>
+      <label>Label (optional) <input id="invite-label" placeholder="Phone cam"></label>
+      <button id="invite-create">Create Invite</button>
+    </div>
+    <div id="invite-output" class="invite-output"></div>
+  </article>
+  <article class="card">
+    <h2>Camera Roster</h2>
+    <div id="roster-list" data-token="{{ token }}" data-initial='{{ roster|tojson }}'></div>
+  </article>
+  <article class="card">
+    <h2>Calibration Board</h2>
+    <p>
+      Pattern:
+      <strong>{{ calibration.chessboard[0] }}x{{ calibration.chessboard[1] }}</strong>
+      inside corners,
+      <strong>{{ "%.1f"|format(calibration.square_size_m * 1000.0) }} mm</strong> squares.
+    </p>
+    <div class="actions">
+      <a class="btn-link" href="/api/calibration/checkerboard.pdf?token={{ token }}">
+        Download Checkerboard PDF (A4)
+      </a>
+    </div>
+    <p class="muted">Print at 100% scale (no fit-to-page) for accurate calibration.</p>
+  </article>
+</section>
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

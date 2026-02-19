@@ -1,0 +1,80 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <main class="card join-root">
+    <h2>Join Camera</h2>
+    <p class="muted">Ticket: <code>{{ ticket_id }}</code></p>
+    {% if not valid_ticket %}
+    <p class="error">This invite is invalid or expired. Ask admin for a new invite.</p>
+    {% endif %}
+    <div class="inline join-controls">
+      <label>Camera Label
+        <input id="camera-label" value="{{ preset_label or '' }}" placeholder="Phone camera">
+      </label>
+      <label>FPS <input id="fps" type="number" value="15"></label>
+      <label>JPEG quality <input id="quality" type="number" value="70" min="30" max="95"></label>
+    </div>
+    <div class="actions join-actions">
+      <button id="start-btn" {% if not valid_ticket %}disabled{% endif %}>Join + Stream</button>
+      <button id="stop-btn">Stop</button>
+    </div>
+    <section id="join-wizard" class="wizard hidden" aria-live="polite">
+      <h3 id="wizard-title">Camera Access Wizard</h3>
+      <p class="muted">Follow these steps once, then tap retry.</p>
+      <div id="diag-summary" class="diag-grid"></div>
+      <ol id="wizard-steps-android" class="wizard-steps hidden">
+        <li class="wizard-step">Open <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> in Chrome.</li>
+        <li class="wizard-step">If it does not jump directly, search for <code>unsafely treat insecure origin as secure</code>.</li>
+        <li class="wizard-step">Enable the flag and add this origin:</li>
+      </ol>
+      <ol id="wizard-steps-firefox" class="wizard-steps hidden">
+        <li class="wizard-step">Open <code>about:config</code> in Firefox Desktop.</li>
+        <li class="wizard-step">Set <code>media.getusermedia.insecure.enabled</code> to <code>true</code>.</li>
+        <li class="wizard-step">If present, set <code>media.devices.insecure.enabled</code> to <code>true</code>.</li>
+        <li class="wizard-step">Reload this page and tap retry.</li>
+      </ol>
+      <ol id="wizard-steps-chromium" class="wizard-steps hidden">
+        <li class="wizard-step">Open <code id="chromium-flags-link">chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>.</li>
+        <li class="wizard-step">If it does not jump directly, search for <code>unsafely treat insecure origin as secure</code>.</li>
+        <li class="wizard-step">Enable it and add this origin:</li>
+      </ol>
+      <div id="chromium-origin-row" class="copy-row hidden">
+        <input id="chromium-origin-input" readonly />
+        <button id="copy-chromium-origin-btn" type="button">Copy origin</button>
+      </div>
+      <div id="chromium-flag-row" class="copy-row hidden">
+        <input id="chromium-flag-input" readonly />
+        <button id="copy-flag-btn" type="button">Copy launch flag</button>
+      </div>
+      <p id="chromium-note" class="muted hidden">Alternative: launch browser with the copied flag if the flags UI is unavailable.</p>
+      <div id="origin-copy-row" class="copy-row hidden">
+        <input id="origin-input" readonly />
+        <button id="copy-origin-btn" type="button">Copy origin</button>
+      </div>
+      <div class="retry-row">
+        <button id="retry-btn" type="button">I enabled it - Retry</button>
+      </div>
+      <p id="wizard-note" class="muted"></p>
+    </section>
+    <section id="join-help" class="wizard hidden">
+      <h3>Troubleshooting</h3>
+      <p id="help-message" class="muted"></p>
+    </section>
+    <video id="video" autoplay playsinline muted></video>
+    <p id="ws-status">idle</p>
+  </main>
+  <script>
+    window.JOIN_TICKET = "{{ ticket_id }}";
+    window.VALID_TICKET = "{{ '1' if valid_ticket else '0' }}";
+  </script>
+  <script src="/static/js/wake_lock.js"></script>
+  <script src="/static/js/join_camera.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="grid">
+  <article class="card">
+    <h2>Mocaption Runtime Monitor</h2>
+    <div id="preview-runtime" class="diag-grid" data-token="{{ token }}">
+      <span class="diag-pill">running: n/a</span>
+      <span class="diag-pill">schema: COCO-17</span>
+      <span class="diag-pill">cameras: 0</span>
+      <span class="diag-pill">valid joints: 0</span>
+      <span class="diag-pill">fps: 0.0</span>
+      <span class="diag-pill">loop: 0.0 ms</span>
+      <span class="diag-pill">dropped cycles: 0</span>
+    </div>
+    <canvas id="pose3d-canvas" width="720" height="420" data-token="{{ token }}"></canvas>
+  </article>
+  <article class="card">
+    <h2>Camera Snapshots</h2>
+    <div class="cams" id="cam-grid" data-token="{{ token }}" data-cameras='{{ cameras|tojson }}'>
+      {% for cam in cameras %}
+      <div class="cam-item">
+        <div class="cam-meta">
+          <p>{{ cam.label }} <span class="muted">({{ cam.camera_id }})</span></p>
+          <p class="muted">status: unknown | seq: 0 | age: n/a</p>
+        </div>
+        <img id="cam-{{ cam.camera_id }}" alt="{{ cam.camera_id }}">
+      </div>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+<script src="/static/js/preview.js"></script>
+{% endblock %}

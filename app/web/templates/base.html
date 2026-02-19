@@ -1,0 +1,38 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} - Mocap Portal</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>Mocap Portal</h1>
+      <p>Live Multi-Cam Control</p>
+    </div>
+    <nav class="desktop-nav">
+      <a href="/">Dashboard</a>
+      <a href="/cameras">Cameras</a>
+      <a href="/calibration">Calibration</a>
+      <a href="/config">Config</a>
+      <a href="/preview">Preview</a>
+      <a href="/logout">Logout</a>
+    </nav>
+  </header>
+  <main class="content with-bottom-nav">
+    {% block content %}{% endblock %}
+  </main>
+  <nav class="mobile-nav">
+    <a href="/">Home</a>
+    <a href="/cameras">Cams</a>
+    <a href="/calibration">Calib</a>
+    <a href="/config">Config</a>
+    <a href="/preview">Preview</a>
+  </nav>
+  <script src="/static/js/wake_lock.js"></script>
+</body>
+</html>
+

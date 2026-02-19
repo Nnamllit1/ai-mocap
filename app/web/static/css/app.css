@@ -1,0 +1,415 @@
+:root {
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --ink: #18202a;
+  --muted: #607087;
+  --accent: #0066cc;
+  --ok: #15803d;
+  --warn: #b45309;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  color: var(--ink);
+  background: radial-gradient(circle at top left, #ffffff 0%, #eaf1f8 55%, #dde8f5 100%);
+}
+
+.topbar {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.8rem 1rem;
+  background: #0d2239;
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.brand p {
+  margin: 0;
+  color: #a9c3e1;
+  font-size: 0.8rem;
+}
+
+.desktop-nav {
+  display: flex;
+  gap: 0.8rem;
+}
+
+.desktop-nav a {
+  color: #c9e2ff;
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+
+.content {
+  padding: 1rem;
+}
+
+.with-bottom-nav {
+  padding-bottom: calc(86px + env(safe-area-inset-bottom));
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  width: 100%;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.7rem;
+  width: 100%;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid #d7e1ec;
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 8px 20px rgba(12, 38, 66, 0.08);
+}
+
+.actions, .inline {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.7rem 1rem;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.btn-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  min-height: 44px;
+  padding: 0.7rem 1rem;
+  text-decoration: none;
+}
+
+input {
+  width: 100%;
+  border: 1px solid #ccd9e8;
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+pre {
+  background: #091423;
+  color: #dbe8f6;
+  border-radius: 8px;
+  padding: 0.7rem;
+  overflow: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+th, td {
+  border-bottom: 1px solid #dce6f2;
+  padding: 0.45rem;
+}
+
+.cams {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 0.5rem;
+}
+
+.cam-item p {
+  margin: 0 0 0.2rem 0;
+  font-size: 0.85rem;
+}
+
+.cam-meta {
+  margin-bottom: 0.35rem;
+}
+
+.cams img {
+  width: 100%;
+  min-height: 120px;
+  object-fit: cover;
+  border: 1px solid #cdd9e8;
+  border-radius: 8px;
+  background: #f0f3f7;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.login-page .card {
+  width: min(92vw, 420px);
+}
+
+.error {
+  color: #b42318;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.ok {
+  color: var(--ok);
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.roster-card, .camera-card {
+  border: 1px solid #d8e2ef;
+  border-radius: 10px;
+  padding: 0.7rem;
+  margin-bottom: 0.6rem;
+  background: #fbfdff;
+}
+
+.roster-card {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.camera-main {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.camera-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.camera-actions .label-input {
+  min-width: 180px;
+}
+
+.invite-output code {
+  background: #eef4fb;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+}
+
+.invite-qr {
+  display: block;
+  width: min(260px, 100%);
+  height: auto;
+  margin: 0.5rem 0;
+  border: 1px solid #d3dfed;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.35rem;
+}
+
+video {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #ccd8e8;
+}
+
+.join-root {
+  margin: 1rem;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.join-controls label {
+  min-width: 180px;
+  flex: 1 1 200px;
+}
+
+.join-actions {
+  margin-bottom: 0.7rem;
+}
+
+.wizard {
+  border: 1px solid #dbe5f2;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 0.8rem;
+  margin: 0.7rem 0;
+}
+
+.wizard h3 {
+  margin: 0 0 0.35rem 0;
+}
+
+.wizard-steps {
+  margin: 0.5rem 0 0.6rem 1.1rem;
+  padding: 0;
+}
+
+.wizard-step {
+  margin: 0.25rem 0;
+}
+
+.diag-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.45rem 0 0.65rem 0;
+}
+
+.diag-pill {
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.82rem;
+  border: 1px solid transparent;
+}
+
+.ok-pill {
+  color: #14532d;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.bad-pill {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.copy-row {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0.5rem 0;
+}
+
+.copy-row input {
+  flex: 1 1 220px;
+}
+
+.copy-row button,
+.retry-row button {
+  min-width: 160px;
+}
+
+.retry-row {
+  margin-top: 0.35rem;
+}
+
+.mobile-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: none;
+  grid-template-columns: repeat(5, 1fr);
+  background: #0f1c2f;
+  border-top: 1px solid #31455f;
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 50;
+}
+
+.mobile-nav a {
+  color: #d7e9ff;
+  text-align: center;
+  text-decoration: none;
+  padding: 0.75rem 0.2rem;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 1024px) {
+  .desktop-nav {
+    gap: 0.5rem;
+  }
+  .desktop-nav a {
+    font-size: 0.84rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    padding: 0.7rem 0.8rem;
+  }
+  .desktop-nav {
+    display: none;
+  }
+  .mobile-nav {
+    display: grid;
+  }
+  .content {
+    padding: 0.7rem;
+  }
+  .grid,
+  .grid2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cams {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .camera-actions .label-input {
+    min-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand h1 {
+    font-size: 1rem;
+  }
+  .brand p {
+    font-size: 0.72rem;
+  }
+  .card {
+    padding: 0.8rem;
+    border-radius: 10px;
+  }
+  button {
+    width: 100%;
+  }
+  .btn-link {
+    width: 100%;
+  }
+  .copy-row button,
+  .retry-row button {
+    min-width: 100%;
+  }
+}

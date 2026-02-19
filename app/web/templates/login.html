@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login - Mocap Portal</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body class="login-page">
+  <form class="card" method="post" action="/login">
+    <h2>Portal Token</h2>
+    <p>Enter access token to continue.</p>
+    <input type="password" name="token" placeholder="Access token" required>
+    <button type="submit">Login</button>
+    {% if error %}
+    <p class="error">{{ error }}</p>
+    {% endif %}
+  </form>
+</body>
+</html>

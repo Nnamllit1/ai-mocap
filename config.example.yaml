@@ -1,0 +1,65 @@
+server:
+  host: 0.0.0.0
+  port: 8000
+  token: "change-this-token"
+
+model:
+  path: yolo26n-pose.pt
+  conf: 0.25
+  iou: 0.45
+  device: cpu
+
+runtime:
+  target_fps: 24
+  max_latency_ms: 120
+  ema_alpha: 0.6
+  show_preview: true
+
+triangulation:
+  min_views: 2
+  pair_conf_threshold: 0.25
+  reproj_error_max: 25.0
+
+osc:
+  host: 127.0.0.1
+  port: 9000
+  address_prefix: /mocap
+
+ingest:
+  jpeg_quality: 70
+  max_frame_size: 1500000
+  client_fps_cap: 20
+  heartbeat_timeout_s: 6.0
+
+export:
+  enable_live_export: true
+  enable_offline_export: true
+  live_json_path: data/exports/live_mocap.json
+  live_csv_path: data/exports/live_mocap.csv
+  offline_json_path: data/exports/offline_mocap.json
+  offline_csv_path: data/exports/offline_mocap.csv
+
+calibration:
+  output_path: data/calibration/cameras.json
+  chessboard: [9, 6]
+  square_size_m: 0.025
+  min_captures: 20
+
+calibration_sync:
+  adaptive_enabled: true
+  min_latency_ms: 120
+  max_latency_ms: 450
+  jitter_factor: 2.0
+  history_size: 60
+  fps_downshift_failure_streak: 3
+
+offline_sources:
+  - id: phone1
+    path: data/phone1.mp4
+    enabled: true
+  - id: phone2
+    path: data/phone2.mp4
+    enabled: true
+  - id: phone3
+    path: data/phone3.mp4
+    enabled: false

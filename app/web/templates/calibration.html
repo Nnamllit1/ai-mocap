@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card" id="calibration-root" data-token="{{ token }}">
+  <h2>Calibration Wizard</h2>
+  <div class="wizard">
+    <h3>Tutorial</h3>
+    <ol class="wizard-steps">
+      <li class="wizard-step">Download and print checkerboard at 100% scale (no fit-to-page).</li>
+      <li class="wizard-step">Connect all cameras and click <strong>Use connected cameras</strong>.</li>
+      <li class="wizard-step">Start session and wait until all cameras are green in readiness.</li>
+      <li class="wizard-step">Move board through center, corners, tilt angles, and distances.</li>
+      <li class="wizard-step">Capture until required count is reached, then Solve.</li>
+    </ol>
+  </div>
+  <div class="inline">
+    <input id="camera-ids" value="" placeholder="cam_x,cam_y">
+    <button id="cal-load-cameras">Use connected cameras</button>
+    <button id="cal-start">Start</button>
+    <button id="cal-capture" disabled>Capture</button>
+    <button id="cal-solve">Solve</button>
+  </div>
+  <div id="cal-readiness" class="wizard">
+    <h3>Readiness</h3>
+    <p id="cal-global" class="muted">No active calibration session.</p>
+    <div id="cal-cam-readiness"></div>
+  </div>
+  <div id="cal-score" class="wizard">
+    <h3>Calibration Score</h3>
+    <p id="cal-score-head" class="muted">Run solve to generate a score.</p>
+    <ul id="cal-score-tips"></ul>
+  </div>
+  <pre id="cal-output">{{ report|tojson(indent=2) }}</pre>
+</article>
+<script src="/static/js/calibration.js"></script>
+{% endblock %}
