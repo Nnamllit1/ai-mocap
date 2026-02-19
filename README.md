@@ -9,6 +9,10 @@
 4. Open:
    - `http://<host>:8000/login`
 
+## Guides
+- Setup guide: `docs/guides/setup.md`
+- Calibration guide: `docs/guides/calibration.md`
+
 ## Camera Join
 - In Dashboard, create a camera invite.
 - Open the generated `/join?ticket=...` link on each phone.

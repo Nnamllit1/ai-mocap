@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <h2>Setup & Calibration Guides</h2>
+  <p class="muted">Use these checklists for a clean first-time setup and repeatable calibration runs.</p>
+
+  <div class="actions">
+    <a class="btn-link" href="/">Dashboard</a>
+    <a class="btn-link" href="/cameras">Cameras</a>
+    <a class="btn-link" href="/calibration">Calibration</a>
+    <a class="btn-link" href="/recording">Recording</a>
+  </div>
+
+  <section class="wizard">
+    <h3>Setup Guide</h3>
+    <ol class="wizard-steps">
+      <li class="wizard-step">Install Python dependencies from <code>requirements.txt</code>.</li>
+      <li class="wizard-step">Set server token and base settings in <code>configs/default.yaml</code>.</li>
+      <li class="wizard-step">Start the server with <code>scripts/run_dev.ps1</code>.</li>
+      <li class="wizard-step">Open <code>/login</code> and authenticate with your token.</li>
+      <li class="wizard-step">Create a camera invite from Dashboard and open the join URL on each phone.</li>
+      <li class="wizard-step">On phone join page, grant camera access and press <strong>Join + Stream</strong>.</li>
+      <li class="wizard-step">Verify camera status in <code>/cameras</code> shows connected.</li>
+      <li class="wizard-step">Start session from Dashboard and verify activity in <code>/preview</code> and <code>/recording</code>.</li>
+    </ol>
+  </section>
+
+  <section class="wizard">
+    <h3>Calibration Guide</h3>
+    <ol class="wizard-steps">
+      <li class="wizard-step">Download checkerboard PDF from Dashboard.</li>
+      <li class="wizard-step">Print at 100% scale (disable fit-to-page).</li>
+      <li class="wizard-step">Confirm all cameras are connected and stable.</li>
+      <li class="wizard-step">Open <code>/calibration</code>, click <strong>Use connected cameras</strong>, then <strong>Start</strong>.</li>
+      <li class="wizard-step">Wait until readiness indicators are fully green.</li>
+      <li class="wizard-step">Capture diverse board poses: corners, near/far, and tilted angles.</li>
+      <li class="wizard-step">Continue until required capture count is reached.</li>
+      <li class="wizard-step">Click <strong>Solve</strong> and verify score, rating, and tips.</li>
+      <li class="wizard-step">If score is weak, recalibrate with better lighting and broader pose variety.</li>
+    </ol>
+
+    <h3>Troubleshooting</h3>
+    <ul class="wizard-steps">
+      <li class="wizard-step"><code>not_all_cameras_ready</code>: wait for sync/connection, reduce FPS if needed.</li>
+      <li class="wizard-step"><code>checkerboard_not_found:&lt;camera_id&gt;</code>: improve visibility, reduce blur, keep board fully in frame.</li>
+      <li class="wizard-step"><code>not_enough_captures</code>: continue capturing until minimum is reached.</li>
+      <li class="wizard-step">If phone camera access fails on HTTP, follow the browser wizard shown on <code>/join</code>.</li>
+    </ul>
+  </section>
+</article>
+{% endblock %}

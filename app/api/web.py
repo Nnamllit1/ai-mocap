@@ -144,6 +144,22 @@ def recording_page(request: Request):
     )
 
 
+@router.get("/guides", response_class=HTMLResponse)
+def guides_page(request: Request):
+    guard = _require_or_redirect(request)
+    if guard:
+        return guard
+    token = resolve_token_from_request(request)
+    return _templates(request).TemplateResponse(
+        request,
+        "guides.html",
+        {
+            "title": "Guides",
+            "token": token,
+        },
+    )
+
+
 @router.get("/join", response_class=HTMLResponse)
 def join_page(request: Request):
     ticket = request.query_params.get("ticket", "")
