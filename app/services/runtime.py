@@ -30,11 +30,18 @@ def build_runtime(config_path: Path) -> RuntimeContext:
     cfg = config_store.config
     event_bus = EventBus()
     capture_hub = CaptureHub(cfg.ingest.heartbeat_timeout_s)
-    calibration_service = CalibrationService(cfg, capture_hub)
+    calibration_service = CalibrationService(
+        cfg,
+        capture_hub,
+        session_state_path=cfg.persistence.calibration_session_path,
+    )
     recording_manager = RecordingManager()
     session_manager = SessionManager(cfg, capture_hub, event_bus, recording_manager)
-    camera_registry = CameraRegistry()
-    join_invites = JoinInviteService(default_ttl_s=120)
+    camera_registry = CameraRegistry(state_path=cfg.persistence.camera_registry_path)
+    join_invites = JoinInviteService(
+        default_ttl_s=120,
+        state_path=cfg.persistence.invites_path,
+    )
     return RuntimeContext(
         config_store=config_store,
         capture_hub=capture_hub,

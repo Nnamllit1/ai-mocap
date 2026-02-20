@@ -1,17 +1,23 @@
 import unittest
+from pathlib import Path
+import tempfile
 import time
 
 import numpy as np
 
 from app.core.calibration import CalibrationService
 from app.core.capture import CameraFrame, CaptureHub
-from app.models.config import AppConfig, CalibrationSyncConfig, RuntimeConfig
+from app.models.config import AppConfig, CalibrationConfig, CalibrationSyncConfig, RuntimeConfig
 
 
 class CalibrationAdaptiveSyncTests(unittest.TestCase):
-    def _cfg(self):
+    def _cfg(self, *, resume_policy: str = "manual", resume_timeout_s: int = 90):
         return AppConfig(
             runtime=RuntimeConfig(max_latency_ms=120),
+            calibration=CalibrationConfig(
+                resume_policy=resume_policy,
+                resume_timeout_s=resume_timeout_s,
+            ),
             calibration_sync=CalibrationSyncConfig(
                 adaptive_enabled=True,
                 min_latency_ms=120,
@@ -150,6 +156,127 @@ class CalibrationAdaptiveSyncTests(unittest.TestCase):
         agg1 = service._aggregate_pose_metrics({"cam_a": pose_a, "cam_b": pose_b})
         agg2 = service._aggregate_pose_metrics({"cam_b": pose_b, "cam_a": pose_a})
         self.assertEqual(agg1, agg2)
+
+    @staticmethod
+    def _connected_diag(camera_ids):
+        return {
+            "sync_skew_ms": 0.0,
+            "per_camera": {
+                cid: {"connected": True, "in_sync": True, "latest_frame_age_ms": 10.0, "seq": 1}
+                for cid in camera_ids
+            },
+        }
+
+    @staticmethod
+    def _disconnected_diag(camera_ids):
+        return {
+            "sync_skew_ms": 0.0,
+            "per_camera": {
+                cid: {"connected": False, "in_sync": False, "latest_frame_age_ms": None, "seq": 0}
+                for cid in camera_ids
+            },
+        }
+
+    def test_calibration_snapshot_restores_as_resume_pending_after_restart(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "calibration_session.json"
+            service = CalibrationService(
+                self._cfg(),
+                CaptureHub(heartbeat_timeout_s=6.0),
+                session_state_path=state_path,
+            )
+            service.start(["cam_a", "cam_b"])
+            restarted = CalibrationService(
+                self._cfg(),
+                CaptureHub(heartbeat_timeout_s=6.0),
+                session_state_path=state_path,
+            )
+            status = restarted.resume_status()
+            self.assertTrue(restarted.session.active)
+            self.assertTrue(restarted.session.resume_pending)
+            self.assertTrue(status["resume_pending"])
+            self.assertEqual(sorted(status["camera_ids"]), ["cam_a", "cam_b"])
+
+    def test_manual_resume_requires_explicit_continue(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "calibration_session.json"
+            cfg = self._cfg(resume_policy="manual")
+            service = CalibrationService(
+                cfg,
+                CaptureHub(heartbeat_timeout_s=6.0),
+                session_state_path=state_path,
+            )
+            service.start(["cam_a", "cam_b"])
+
+            hub = CaptureHub(heartbeat_timeout_s=6.0)
+            restarted = CalibrationService(
+                cfg,
+                hub,
+                session_state_path=state_path,
+            )
+            hub.get_frame_diagnostics = (
+                lambda camera_ids, max_latency_ms: self._connected_diag(camera_ids)
+            )
+
+            readiness = restarted.readiness()
+            self.assertTrue(restarted.session.resume_pending)
+            self.assertEqual(readiness["capture_block_reason"], "resume_pending")
+
+            resumed = restarted.resume_continue()
+            self.assertTrue(resumed["ok"])
+            self.assertFalse(restarted.session.resume_pending)
+
+    def test_timeout_resume_auto_resumes_if_all_cameras_reconnect(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "calibration_session.json"
+            cfg = self._cfg(resume_policy="timeout", resume_timeout_s=5)
+            service = CalibrationService(
+                cfg,
+                CaptureHub(heartbeat_timeout_s=6.0),
+                session_state_path=state_path,
+            )
+            service.start(["cam_a", "cam_b"])
+
+            hub = CaptureHub(heartbeat_timeout_s=6.0)
+            restarted = CalibrationService(
+                cfg,
+                hub,
+                session_state_path=state_path,
+            )
+            hub.get_frame_diagnostics = (
+                lambda camera_ids, max_latency_ms: self._connected_diag(camera_ids)
+            )
+
+            status = restarted.resume_status()
+            self.assertFalse(status["resume_pending"])
+            self.assertEqual(status.get("resolved_reason"), "auto_resumed")
+            self.assertFalse(restarted.session.resume_pending)
+
+    def test_timeout_resume_resets_if_cameras_do_not_reconnect(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "calibration_session.json"
+            cfg = self._cfg(resume_policy="timeout", resume_timeout_s=0)
+            service = CalibrationService(
+                cfg,
+                CaptureHub(heartbeat_timeout_s=6.0),
+                session_state_path=state_path,
+            )
+            service.start(["cam_a", "cam_b"])
+
+            hub = CaptureHub(heartbeat_timeout_s=6.0)
+            restarted = CalibrationService(
+                cfg,
+                hub,
+                session_state_path=state_path,
+            )
+            hub.get_frame_diagnostics = (
+                lambda camera_ids, max_latency_ms: self._disconnected_diag(camera_ids)
+            )
+
+            status = restarted.resume_status()
+            self.assertFalse(status["resume_pending"])
+            self.assertEqual(status.get("resolved_reason"), "resume_timeout_reset")
+            self.assertFalse(restarted.session.active)
 
 
 if __name__ == "__main__":

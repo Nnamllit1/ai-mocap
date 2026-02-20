@@ -58,6 +58,8 @@ calibration:
   auto_stable_threshold_norm: 0.010
   auto_min_board_area_norm: 0.008
   auto_pose_delta_threshold: 0.12
+  resume_policy: manual
+  resume_timeout_s: 90
 
 calibration_sync:
   adaptive_enabled: true
@@ -66,6 +68,12 @@ calibration_sync:
   jitter_factor: 2.0
   history_size: 60
   fps_downshift_failure_streak: 3
+
+persistence:
+  state_dir: data/state
+  invites_path: data/state/join_invites.json
+  camera_registry_path: data/state/camera_registry.json
+  calibration_session_path: data/state/calibration_session.json
 
 offline_sources:
   - id: phone1

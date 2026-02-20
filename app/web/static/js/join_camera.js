@@ -53,6 +53,10 @@
   let timer = null;
   let heart = null;
   let assignedCameraId = null;
+  let lastRegistration = null;
+  let reconnectTimer = null;
+  let reconnectAttempts = 0;
+  let shouldAutoReconnect = false;
 
   function setState(state, message) {
     statusEl.textContent = `${state}${message ? `: ${message}` : ""}`;
@@ -260,9 +264,28 @@
   }
 
   function openSocket(registration) {
+    lastRegistration = registration;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (timer) clearInterval(timer);
+    if (heart) clearInterval(heart);
+    timer = null;
+    heart = null;
+    if (ws) {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      if (ws.readyState <= 1) {
+        ws.close();
+      }
+    }
     ws = new WebSocket(registration.ws_url);
     ws.binaryType = "arraybuffer";
     ws.onopen = () => {
+      reconnectAttempts = 0;
       setState(STATES.STREAMING, assignedCameraId || "connected");
       if (recordingHintEl) {
         recordingHintEl.textContent = "Camera is streaming. Use the admin Recording tab to control capture and export.";
@@ -295,16 +318,43 @@
         }
       } catch (_) {}
     };
-    ws.onclose = () => setState(STATES.ERROR, "reconnecting/disconnected");
-    ws.onerror = () => setState(STATES.ERROR, "websocket");
+    ws.onclose = () => {
+      if (!shouldAutoReconnect || !lastRegistration) {
+        setState(STATES.ERROR, "disconnected");
+        return;
+      }
+      const delayMs = Math.min(8000, 500 * (2 ** reconnectAttempts));
+      reconnectAttempts += 1;
+      setState(STATES.RETRYING, `reconnect in ${Math.round(delayMs / 1000)}s`);
+      if (reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!shouldAutoReconnect || !lastRegistration) return;
+        openSocket(lastRegistration);
+      }, delayMs);
+    };
+    ws.onerror = () => {
+      setState(STATES.RETRYING, "websocket reconnecting");
+    };
   }
 
   function cleanupStream() {
+    shouldAutoReconnect = false;
+    lastRegistration = null;
+    reconnectAttempts = 0;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
     if (timer) clearInterval(timer);
     if (heart) clearInterval(heart);
     timer = null;
     heart = null;
-    if (ws && ws.readyState <= 1) ws.close();
+    if (ws) {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      if (ws.readyState <= 1) ws.close();
+    }
     ws = null;
     if (stream) {
       stream.getTracks().forEach((t) => t.stop());
@@ -363,6 +413,7 @@
 
     setState(STATES.REGISTERING);
     const registration = await registerCamera();
+    shouldAutoReconnect = true;
     openSocket(registration);
   }
 

@@ -73,6 +73,8 @@ class CalibrationConfig(BaseModel):
     auto_stable_threshold_norm: float = 0.010
     auto_min_board_area_norm: float = 0.008
     auto_pose_delta_threshold: float = 0.12
+    resume_policy: str = "manual"
+    resume_timeout_s: int = 90
 
     @field_validator("chessboard")
     @classmethod
@@ -97,6 +99,13 @@ class OfflineSource(BaseModel):
     enabled: bool = True
 
 
+class PersistenceConfig(BaseModel):
+    state_dir: str = "data/state"
+    invites_path: str = "data/state/join_invites.json"
+    camera_registry_path: str = "data/state/camera_registry.json"
+    calibration_session_path: str = "data/state/calibration_session.json"
+
+
 class AppConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
@@ -107,6 +116,7 @@ class AppConfig(BaseModel):
     export: ExportConfig = Field(default_factory=ExportConfig)
     calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)
     calibration_sync: CalibrationSyncConfig = Field(default_factory=CalibrationSyncConfig)
+    persistence: PersistenceConfig = Field(default_factory=PersistenceConfig)
     offline_sources: list[OfflineSource] = Field(default_factory=list)
 
     def calibration_path(self) -> Path:
@@ -131,3 +141,4 @@ class ConfigUpdate(BaseModel):
     export: Optional[ExportConfig] = None
     calibration: Optional[CalibrationConfig] = None
     calibration_sync: Optional[CalibrationSyncConfig] = None
+    persistence: Optional[PersistenceConfig] = None

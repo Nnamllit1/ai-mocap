@@ -10,6 +10,9 @@
   const camReadiness = document.getElementById("cal-cam-readiness");
   const scoreHead = document.getElementById("cal-score-head");
   const scoreTips = document.getElementById("cal-score-tips");
+  const resumeRoot = document.getElementById("cal-resume");
+  const resumeContinueBtn = document.getElementById("cal-resume-continue");
+  const resumeResetBtn = document.getElementById("cal-resume-reset");
   let autoEnabled = false;
   let autoInFlight = false;
   let lastAttemptTs = 0;
@@ -43,8 +46,35 @@
     return ok ? "ok-pill" : "bad-pill";
   }
 
+  function renderResume(resume) {
+    if (!resumeRoot) return;
+    if (!resume || !resume.resume_pending) {
+      resumeRoot.innerHTML = `<span class="diag-pill">resume: none</span>`;
+      if (resumeContinueBtn) resumeContinueBtn.disabled = true;
+      if (resumeResetBtn) resumeResetBtn.disabled = true;
+      return;
+    }
+    const missing = Array.isArray(resume.missing_ids) ? resume.missing_ids : [];
+    const connected = Array.isArray(resume.connected_ids) ? resume.connected_ids : [];
+    const remaining = resume.remaining_ms == null ? "n/a" : `${Math.max(0, Math.round(Number(resume.remaining_ms) / 1000))} s`;
+    resumeRoot.innerHTML = `
+      <span class="diag-pill bad-pill">resume pending: true</span>
+      <span class="diag-pill">policy: ${resume.policy || "manual"}</span>
+      <span class="diag-pill">captures: ${Number(resume.captures || 0)}</span>
+      <span class="diag-pill">connected: ${connected.length}</span>
+      <span class="diag-pill">missing: ${missing.length}</span>
+      <span class="diag-pill">timeout left: ${remaining}</span>
+    `;
+    if (missing.length > 0) {
+      resumeRoot.innerHTML += `<p class="muted">missing cameras: ${missing.join(", ")}</p>`;
+    }
+    if (resumeContinueBtn) resumeContinueBtn.disabled = !Boolean(resume.all_connected);
+    if (resumeResetBtn) resumeResetBtn.disabled = false;
+  }
+
   function renderReadiness(data) {
     latestReadiness = data;
+    renderResume(data?.resume || null);
     if (!data || !data.active) {
       globalReadiness.textContent = "No active calibration session.";
       camReadiness.innerHTML = "";
@@ -206,6 +236,28 @@
     } catch (err) {
       output.textContent = JSON.stringify({ ok: false, error: String(err.message || err) }, null, 2);
     }
+  });
+
+  resumeContinueBtn?.addEventListener("click", async () => {
+    try {
+      const data = await post("/api/calibration/resume/continue");
+      output.textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      output.textContent = JSON.stringify({ ok: false, error: String(err.message || err) }, null, 2);
+    }
+    await refreshReadiness();
+    await refreshScore();
+  });
+
+  resumeResetBtn?.addEventListener("click", async () => {
+    try {
+      const data = await post("/api/calibration/resume/reset");
+      output.textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      output.textContent = JSON.stringify({ ok: false, error: String(err.message || err) }, null, 2);
+    }
+    await refreshReadiness();
+    await refreshScore();
   });
 
   async function maybeAutoCapture() {

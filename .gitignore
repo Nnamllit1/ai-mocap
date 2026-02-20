@@ -28,6 +28,7 @@ Thumbs.db
 # Local runtime outputs
 data/exports/
 data/calibration/cameras.json
+data/state/
 
 # Local model weights
 *.pt

@@ -32,6 +32,24 @@ class TriangulationTests(unittest.TestCase):
         )
         return TriangulationEngine(self._store(), cfg)
 
+    def _tri_distorted(self, **cfg_kwargs):
+        store = self._store()
+        for cid, (k, _) in list(store.intrinsics.items()):
+            store.intrinsics[cid] = (
+                k,
+                np.array([[-0.18], [0.05], [0.0], [0.0], [0.0]], dtype=np.float64),
+            )
+        cfg = TriangulationConfig(
+            min_views=2,
+            pair_conf_threshold=0.2,
+            reproj_error_max=6.0,
+            allow_single_view_fallback=True,
+            single_view_conf_scale=0.55,
+            single_view_max_age_ms=1000,
+            **cfg_kwargs,
+        )
+        return TriangulationEngine(store, cfg)
+
     def _obs_for_xyz(self, tri: TriangulationEngine, xyz: np.ndarray, conf: float = 0.95):
         out = {}
         for cid in tri.projections:
@@ -101,6 +119,25 @@ class TriangulationTests(unittest.TestCase):
         self.assertIsNotNone(estimate)
         self.assertEqual(estimate.mode, "single_view")
         self.assertEqual(estimate.inlier_camera_ids, ["cam0"])
+
+    def test_distortion_aware_triangulation_recovers_point(self):
+        tri = self._tri_distorted(reproj_error_max=5.0)
+        xyz_true = np.array([0.12, -0.04, 2.8], dtype=np.float64)
+        obs = self._obs_for_xyz(tri, xyz_true)
+        estimate = tri.estimate_joint(obs, timestamp=20.0)
+        self.assertIsNotNone(estimate)
+        self.assertEqual(estimate.mode, "measured")
+        self.assertGreaterEqual(len(estimate.inlier_camera_ids), 2)
+        np.testing.assert_allclose(estimate.xyz, xyz_true, atol=0.05, rtol=0)
+
+    def test_cheirality_marks_behind_camera_as_outlier(self):
+        tri = self._tri()
+        errors = tri._reprojection_errors(
+            np.array([0.0, 0.0, -1.0], dtype=np.float64),
+            {"cam0": (320.0, 240.0, 0.95)},
+        )
+        self.assertIn("cam0", errors)
+        self.assertTrue(np.isinf(errors["cam0"]))
 
 
 if __name__ == "__main__":

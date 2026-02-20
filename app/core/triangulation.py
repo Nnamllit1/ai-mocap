@@ -24,46 +24,114 @@ class TriangulationEngine:
         self.calibration = calibration
         self.cfg = cfg
         self.projections: Dict[str, np.ndarray] = {}
+        self.projections_norm: Dict[str, np.ndarray] = {}
         self.rotations: Dict[str, np.ndarray] = {}
         self.translations: Dict[str, np.ndarray] = {}
-        self.k_inv: Dict[str, np.ndarray] = {}
+        self.intrinsics: Dict[str, np.ndarray] = {}
+        self.distortions: Dict[str, np.ndarray] = {}
+        self.rvecs: Dict[str, np.ndarray] = {}
         self._build_projection_matrices()
 
     def _build_projection_matrices(self) -> None:
         self.projections = {}
+        self.projections_norm = {}
         self.rotations = {}
         self.translations = {}
-        self.k_inv = {}
+        self.intrinsics = {}
+        self.distortions = {}
+        self.rvecs = {}
+
         for cam_id in self.calibration.intrinsics:
             if cam_id not in self.calibration.extrinsics:
                 continue
-            k_mat, _ = self.calibration.intrinsics[cam_id]
+
+            k_mat, dist = self.calibration.intrinsics[cam_id]
             r_mat, t_vec = self.calibration.extrinsics[cam_id]
             k = np.array(k_mat, dtype=np.float64)
+            d = np.array(dist, dtype=np.float64).reshape(-1, 1)
             r = np.array(r_mat, dtype=np.float64)
             t = np.array(t_vec, dtype=np.float64).reshape(3, 1)
-            self.projections[cam_id] = k @ np.hstack([r, t])
+
+            p_norm = np.hstack([r, t])
+            self.projections_norm[cam_id] = p_norm
+            self.projections[cam_id] = k @ p_norm
             self.rotations[cam_id] = r
             self.translations[cam_id] = t
-            self.k_inv[cam_id] = np.linalg.inv(k)
+            self.intrinsics[cam_id] = k
+            self.distortions[cam_id] = d
+            rvec, _ = cv2.Rodrigues(r)
+            self.rvecs[cam_id] = rvec
+
+    @staticmethod
+    def _is_finite_xy(x: float, y: float) -> bool:
+        return bool(np.isfinite(x) and np.isfinite(y))
+
+    def _required_views(self) -> int:
+        return max(2, int(self.cfg.min_views))
+
+    def _undistort_normalized(self, cam_id: str, x: float, y: float) -> Optional[np.ndarray]:
+        if cam_id not in self.intrinsics or cam_id not in self.distortions:
+            return None
+        points = np.array([[[float(x), float(y)]]], dtype=np.float64)
+        norm = cv2.undistortPoints(
+            points,
+            self.intrinsics[cam_id],
+            self.distortions[cam_id],
+            P=None,
+        )
+        if norm is None or norm.shape[0] == 0:
+            return None
+        uv = np.array(norm[0, 0, :], dtype=np.float64)
+        if not np.all(np.isfinite(uv)):
+            return None
+        return uv
 
     def _project(self, cam_id: str, xyz: np.ndarray) -> np.ndarray:
-        proj = self.projections[cam_id]
-        xyz_h = np.array([xyz[0], xyz[1], xyz[2], 1.0], dtype=np.float64)
-        uvw = proj @ xyz_h
-        if abs(float(uvw[2])) < 1e-8:
+        if (
+            cam_id not in self.intrinsics
+            or cam_id not in self.distortions
+            or cam_id not in self.rvecs
+            or cam_id not in self.translations
+        ):
             return np.array([np.nan, np.nan], dtype=np.float64)
-        return np.array([uvw[0] / uvw[2], uvw[1] / uvw[2]], dtype=np.float64)
+        point = np.array(xyz, dtype=np.float64).reshape(1, 1, 3)
+        try:
+            image_points, _ = cv2.projectPoints(
+                point,
+                self.rvecs[cam_id],
+                self.translations[cam_id],
+                self.intrinsics[cam_id],
+                self.distortions[cam_id],
+            )
+        except cv2.error:
+            return np.array([np.nan, np.nan], dtype=np.float64)
+        uv = np.array(image_points[0, 0, :], dtype=np.float64)
+        if not np.all(np.isfinite(uv)):
+            return np.array([np.nan, np.nan], dtype=np.float64)
+        return uv
+
+    def _depth_in_camera(self, cam_id: str, xyz: np.ndarray) -> float:
+        if cam_id not in self.rotations or cam_id not in self.translations:
+            return float("nan")
+        world = np.array(xyz, dtype=np.float64).reshape(3, 1)
+        cam = self.rotations[cam_id] @ world + self.translations[cam_id]
+        return float(cam[2, 0])
 
     def _reprojection_errors(
         self, xyz: np.ndarray, observations: Dict[str, Tuple[float, float, float]]
     ) -> dict[str, float]:
         errors: dict[str, float] = {}
         for cam_id, (x, y, conf) in observations.items():
-            if cam_id not in self.projections or conf < self.cfg.pair_conf_threshold:
+            if cam_id not in self.projections:
+                continue
+            if float(conf) < self.cfg.pair_conf_threshold:
+                continue
+            if self._depth_in_camera(cam_id, xyz) <= 1e-6:
+                errors[cam_id] = float("inf")
                 continue
             uv = self._project(cam_id, xyz)
-            if np.any(np.isnan(uv)):
+            if not np.all(np.isfinite(uv)):
+                errors[cam_id] = float("inf")
                 continue
             errors[cam_id] = float(np.linalg.norm(uv - np.array([x, y], dtype=np.float64)))
         return errors
@@ -75,20 +143,28 @@ class TriangulationEngine:
         obs_a: Tuple[float, float, float],
         obs_b: Tuple[float, float, float],
     ) -> Optional[np.ndarray]:
-        p1 = self.projections[cam_a]
-        p2 = self.projections[cam_b]
+        if cam_a not in self.projections_norm or cam_b not in self.projections_norm:
+            return None
+
         x1, y1, _ = obs_a
         x2, y2, _ = obs_b
+        uv1 = self._undistort_normalized(cam_a, x1, y1)
+        uv2 = self._undistort_normalized(cam_b, x2, y2)
+        if uv1 is None or uv2 is None:
+            return None
+
         xyz_h = cv2.triangulatePoints(
-            p1,
-            p2,
-            np.array([[x1], [y1]], dtype=np.float64),
-            np.array([[x2], [y2]], dtype=np.float64),
+            self.projections_norm[cam_a],
+            self.projections_norm[cam_b],
+            uv1.reshape(2, 1),
+            uv2.reshape(2, 1),
         )
         if abs(float(xyz_h[3, 0])) < 1e-9:
             return None
         xyz = (xyz_h[:3, 0] / xyz_h[3, 0]).astype(np.float64)
         if not np.all(np.isfinite(xyz)):
+            return None
+        if self._depth_in_camera(cam_a, xyz) <= 1e-6 or self._depth_in_camera(cam_b, xyz) <= 1e-6:
             return None
         return xyz
 
@@ -98,14 +174,19 @@ class TriangulationEngine:
     ) -> Optional[np.ndarray]:
         rows = []
         for cam_id, (x, y, conf) in observations.items():
-            if cam_id not in self.projections:
+            if cam_id not in self.projections_norm:
                 continue
-            p = self.projections[cam_id]
+            uv = self._undistort_normalized(cam_id, x, y)
+            if uv is None:
+                continue
+            p = self.projections_norm[cam_id]
             w = max(1e-4, float(conf))
-            rows.append(w * ((float(x) * p[2, :]) - p[0, :]))
-            rows.append(w * ((float(y) * p[2, :]) - p[1, :]))
+            rows.append(w * ((float(uv[0]) * p[2, :]) - p[0, :]))
+            rows.append(w * ((float(uv[1]) * p[2, :]) - p[1, :]))
+
         if len(rows) < 4:
             return None
+
         a_mat = np.array(rows, dtype=np.float64)
         _, _, vt = np.linalg.svd(a_mat, full_matrices=False)
         xyz_h = vt[-1, :]
@@ -131,17 +212,16 @@ class TriangulationEngine:
         age_ms = max(0.0, (float(timestamp) - float(prior_timestamp)) * 1000.0)
         if age_ms > float(self.cfg.single_view_max_age_ms):
             return None
-        if cam_id not in self.k_inv or cam_id not in self.rotations or cam_id not in self.translations:
+        if cam_id not in self.rotations or cam_id not in self.translations:
             return None
 
         x, y, _ = observation
-        pixel = np.array([float(x), float(y), 1.0], dtype=np.float64)
-        ray = self.k_inv[cam_id] @ pixel
-        if not np.all(np.isfinite(ray)):
+        uv = self._undistort_normalized(cam_id, x, y)
+        if uv is None:
             return None
-        if abs(float(ray[2])) < 1e-8:
+        ray_cam = np.array([float(uv[0]), float(uv[1]), 1.0], dtype=np.float64).reshape(3, 1)
+        if not np.all(np.isfinite(ray_cam)):
             return None
-        ray = ray / float(ray[2])
 
         prior = np.array(prior_xyz, dtype=np.float64).reshape(3, 1)
         r_mat = self.rotations[cam_id]
@@ -151,12 +231,76 @@ class TriangulationEngine:
         if depth <= 1e-6:
             return None
 
-        cam_point = (ray * depth).reshape(3, 1)
+        cam_point = ray_cam * depth
         world_point = r_mat.T @ (cam_point - t_vec)
         xyz = world_point.reshape(3).astype(np.float64)
         if not np.all(np.isfinite(xyz)):
             return None
+        if self._depth_in_camera(cam_id, xyz) <= 1e-6:
+            return None
         return xyz
+
+    def _select_best_candidate(
+        self, valid: Dict[str, Tuple[float, float, float]]
+    ) -> tuple[np.ndarray | None, list[str], float]:
+        best_xyz: np.ndarray | None = None
+        best_inliers: list[str] = []
+        best_med_err = float("inf")
+        best_mean_conf = -1.0
+
+        for cam_a, cam_b in itertools.combinations(valid.keys(), 2):
+            xyz = self._triangulate_pair(cam_a, cam_b, valid[cam_a], valid[cam_b])
+            if xyz is None:
+                continue
+            errors = self._reprojection_errors(xyz, valid)
+            inliers = sorted(
+                cid
+                for cid, err in errors.items()
+                if np.isfinite(err) and err <= float(self.cfg.reproj_error_max)
+            )
+            if not inliers:
+                continue
+            med_err = float(np.median([errors[cid] for cid in inliers]))
+            mean_conf = float(np.mean([valid[cid][2] for cid in inliers]))
+
+            if len(inliers) > len(best_inliers):
+                best_xyz = xyz
+                best_inliers = inliers
+                best_med_err = med_err
+                best_mean_conf = mean_conf
+                continue
+            if len(inliers) == len(best_inliers) and med_err < best_med_err:
+                best_xyz = xyz
+                best_inliers = inliers
+                best_med_err = med_err
+                best_mean_conf = mean_conf
+                continue
+            if (
+                len(inliers) == len(best_inliers)
+                and abs(med_err - best_med_err) <= 1e-9
+                and mean_conf > best_mean_conf
+            ):
+                best_xyz = xyz
+                best_inliers = inliers
+                best_med_err = med_err
+                best_mean_conf = mean_conf
+
+        if best_xyz is not None:
+            return best_xyz, best_inliers, best_med_err
+
+        weighted = self._triangulate_weighted(valid)
+        if weighted is None:
+            return None, [], float("inf")
+        errors = self._reprojection_errors(weighted, valid)
+        inliers = sorted(
+            cid
+            for cid, err in errors.items()
+            if np.isfinite(err) and err <= float(self.cfg.reproj_error_max)
+        )
+        if not inliers:
+            return None, [], float("inf")
+        med_err = float(np.median([errors[cid] for cid in inliers]))
+        return weighted, inliers, med_err
 
     def estimate_joint(
         self,
@@ -166,12 +310,12 @@ class TriangulationEngine:
         prior_timestamp: float | None = None,
         timestamp: float | None = None,
     ) -> Optional[JointEstimate]:
-        valid = {}
+        valid: Dict[str, Tuple[float, float, float]] = {}
         for cid, obs in observations.items():
             if cid not in self.projections:
                 continue
             x, y, conf = obs
-            if not np.isfinite(x) or not np.isfinite(y):
+            if not self._is_finite_xy(float(x), float(y)):
                 continue
             if float(conf) < self.cfg.pair_conf_threshold:
                 continue
@@ -198,106 +342,55 @@ class TriangulationEngine:
                 reprojection_error=None,
             )
 
-        best_xyz: np.ndarray | None = None
-        best_inliers: list[str] = []
-        best_med_err = float("inf")
-        best_mean_conf = -1.0
-
-        for cam_a, cam_b in itertools.combinations(valid.keys(), 2):
-            xyz = self._triangulate_pair(cam_a, cam_b, valid[cam_a], valid[cam_b])
-            if xyz is None:
-                continue
-            errors = self._reprojection_errors(xyz, valid)
-            inliers = [cid for cid, err in errors.items() if err <= self.cfg.reproj_error_max]
-            if not inliers:
-                continue
-            med_err = float(np.median([errors[cid] for cid in inliers]))
-            mean_conf = float(np.mean([valid[cid][2] for cid in inliers]))
-            if len(inliers) > len(best_inliers):
-                best_xyz = xyz
-                best_inliers = inliers
-                best_med_err = med_err
-                best_mean_conf = mean_conf
-                continue
-            if len(inliers) == len(best_inliers) and med_err < best_med_err:
-                best_xyz = xyz
-                best_inliers = inliers
-                best_med_err = med_err
-                best_mean_conf = mean_conf
-                continue
-            if (
-                len(inliers) == len(best_inliers)
-                and abs(med_err - best_med_err) <= 1e-9
-                and mean_conf > best_mean_conf
-            ):
-                best_xyz = xyz
-                best_inliers = inliers
-                best_med_err = med_err
-                best_mean_conf = mean_conf
-
+        best_xyz, best_inliers, _ = self._select_best_candidate(valid)
         if best_xyz is None:
             return None
 
-        if len(best_inliers) >= self.cfg.min_views:
-            inlier_obs = {cid: valid[cid] for cid in best_inliers}
-            refined = self._triangulate_weighted(inlier_obs)
-            if refined is None:
-                refined = best_xyz
-            errors = self._reprojection_errors(refined, valid)
-            inliers = [cid for cid, err in errors.items() if err <= self.cfg.reproj_error_max]
-            if len(inliers) >= self.cfg.min_views:
-                inlier_obs2 = {cid: valid[cid] for cid in inliers}
-                refined2 = self._triangulate_weighted(inlier_obs2)
-                if refined2 is None:
-                    refined2 = refined
-                errors2 = self._reprojection_errors(refined2, valid)
-                inliers2 = [cid for cid, err in errors2.items() if err <= self.cfg.reproj_error_max]
-                if len(inliers2) >= self.cfg.min_views:
-                    reproj = float(np.median([errors2[cid] for cid in inliers2]))
-                    return JointEstimate(
-                        xyz=refined2,
-                        mode="measured",
-                        inlier_camera_ids=sorted(inliers2),
-                        reprojection_error=reproj,
-                    )
-                if len(inliers2) == 1:
-                    cid = inliers2[0]
-                    fallback = self._single_view_fallback(
-                        cid,
-                        valid[cid],
-                        prior_xyz=prior_xyz,
-                        prior_timestamp=prior_timestamp,
-                        timestamp=timestamp,
-                    )
-                    if fallback is not None:
-                        return JointEstimate(
-                            xyz=fallback,
-                            mode="single_view",
-                            inlier_camera_ids=[cid],
-                            reprojection_error=errors2.get(cid),
-                        )
-                return None
-            if len(inliers) == 1:
-                cid = inliers[0]
-                fallback = self._single_view_fallback(
-                    cid,
-                    valid[cid],
-                    prior_xyz=prior_xyz,
-                    prior_timestamp=prior_timestamp,
-                    timestamp=timestamp,
-                )
-                if fallback is None:
-                    return None
-                return JointEstimate(
-                    xyz=fallback,
-                    mode="single_view",
-                    inlier_camera_ids=[cid],
-                    reprojection_error=errors.get(cid),
-                )
-            return None
+        inlier_ids = list(best_inliers)
+        refined_xyz = np.array(best_xyz, dtype=np.float64)
+        errors = self._reprojection_errors(refined_xyz, valid)
 
-        if len(best_inliers) == 1:
-            cam_id = best_inliers[0]
+        for _ in range(2):
+            if len(inlier_ids) >= 2:
+                refined_obs = {cid: valid[cid] for cid in inlier_ids}
+                weighted = self._triangulate_weighted(refined_obs)
+                if weighted is not None:
+                    refined_xyz = weighted
+            errors = self._reprojection_errors(refined_xyz, valid)
+            new_inliers = sorted(
+                cid
+                for cid, err in errors.items()
+                if np.isfinite(err) and err <= float(self.cfg.reproj_error_max)
+            )
+            if new_inliers == inlier_ids:
+                break
+            inlier_ids = new_inliers
+
+        required_views = self._required_views()
+        if len(inlier_ids) >= required_views:
+            final_obs = {cid: valid[cid] for cid in inlier_ids}
+            final_xyz = self._triangulate_weighted(final_obs)
+            if final_xyz is None:
+                final_xyz = refined_xyz
+            final_errors = self._reprojection_errors(final_xyz, valid)
+            final_inliers = sorted(
+                cid
+                for cid, err in final_errors.items()
+                if np.isfinite(err) and err <= float(self.cfg.reproj_error_max)
+            )
+            if len(final_inliers) >= required_views:
+                reproj = float(np.median([final_errors[cid] for cid in final_inliers]))
+                return JointEstimate(
+                    xyz=final_xyz,
+                    mode="measured",
+                    inlier_camera_ids=final_inliers,
+                    reprojection_error=reproj,
+                )
+            inlier_ids = final_inliers
+            errors = final_errors
+
+        if len(inlier_ids) == 1:
+            cam_id = inlier_ids[0]
             fallback = self._single_view_fallback(
                 cam_id,
                 valid[cam_id],
@@ -311,7 +404,7 @@ class TriangulationEngine:
                 xyz=fallback,
                 mode="single_view",
                 inlier_camera_ids=[cam_id],
-                reprojection_error=best_med_err if np.isfinite(best_med_err) else None,
+                reprojection_error=errors.get(cam_id),
             )
 
         return None

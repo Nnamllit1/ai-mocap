@@ -33,11 +33,14 @@ class CalibrationReadinessApiTests(unittest.TestCase):
         self.assertIn("recommended_fps_cap", payload)
         self.assertIn("board_metrics", payload)
         self.assertIn("capture_block_reason", payload)
+        self.assertIn("resume", payload)
         self.assertIn("quality_ok", payload["board_metrics"])
         self.assertIn("pose_delta", payload["board_metrics"])
         self.assertIn("stable_ms", payload["board_metrics"])
         self.assertIn("board_area_norm_by_camera", payload["board_metrics"])
         self.assertIn("board_quality_ok_by_camera", payload["board_metrics"])
+        self.assertIn("resume_pending", payload["resume"])
+        self.assertIn("policy", payload["resume"])
 
     def test_capture_endpoint_accepts_default_and_manual_mode_payload(self):
         app = create_app()
@@ -57,6 +60,36 @@ class CalibrationReadinessApiTests(unittest.TestCase):
         )
         self.assertEqual(response_manual.status_code, 400)
         self.assertIn("Calibration session is not active.", response_manual.json().get("detail", ""))
+
+    def test_calibration_resume_endpoints_exist(self):
+        app = create_app()
+        client = TestClient(app)
+        token = app.state.runtime.config_store.config.server.token
+        app.state.runtime.calibration_service.session.active = False
+        app.state.runtime.calibration_service.session.resume_pending = False
+
+        status_resp = client.get(
+            "/api/calibration/resume/status",
+            headers={"x-access-token": token},
+        )
+        self.assertEqual(status_resp.status_code, 200)
+        payload = status_resp.json()
+        self.assertIn("resume_pending", payload)
+        self.assertIn("policy", payload)
+
+        continue_resp = client.post(
+            "/api/calibration/resume/continue",
+            headers={"x-access-token": token},
+        )
+        self.assertEqual(continue_resp.status_code, 400)
+        self.assertIn("no_resume_pending", continue_resp.json().get("detail", ""))
+
+        reset_resp = client.post(
+            "/api/calibration/resume/reset",
+            headers={"x-access-token": token},
+        )
+        self.assertEqual(reset_resp.status_code, 200)
+        self.assertTrue(reset_resp.json().get("ok"))
 
 
 if __name__ == "__main__":

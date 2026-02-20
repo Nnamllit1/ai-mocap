@@ -2,6 +2,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 import os
+from pathlib import Path
 import time
 from typing import Any, Dict, List, Tuple
 
@@ -11,6 +12,7 @@ import numpy as np
 from app.core.capture import CaptureHub
 from app.models.config import AppConfig
 from app.services.calibration_store import CalibrationStore
+from app.services.state_io import load_json, save_json_atomic
 
 
 @dataclass
@@ -30,20 +32,233 @@ class CalibrationSession:
     stable_since_ts_ms: float | None = None
     last_readiness_metrics: Dict[str, Any] = field(default_factory=dict)
     last_pose_sample: Dict[str, float] | None = None
+    resume_pending: bool = False
+    resume_policy: str = "manual"
+    resume_deadline_ts_ms: float | None = None
+    resume_snapshot_ts_ms: float | None = None
+    resume_auto_reset: bool = False
+    resume_reason: str | None = None
 
 
 class CalibrationService:
     _detect_timeout_s = 0.35
 
-    def __init__(self, cfg: AppConfig, capture_hub: CaptureHub):
+    def __init__(
+        self,
+        cfg: AppConfig,
+        capture_hub: CaptureHub,
+        session_state_path: str | Path | None = None,
+    ):
         self.cfg = cfg
         self.capture_hub = capture_hub
+        self._session_state_path = Path(session_state_path) if session_state_path else None
         self.session = CalibrationSession()
         workers = max(2, min(4, int(os.cpu_count() or 2)))
         self._detector_pool = ThreadPoolExecutor(
             max_workers=workers,
             thread_name_prefix="checkerboard",
         )
+        self._restore_session_snapshot()
+
+    @staticmethod
+    def _to_list_points(points: Dict[str, List[np.ndarray]]) -> Dict[str, List[list]]:
+        out: Dict[str, List[list]] = {}
+        for cid, arrs in points.items():
+            out[cid] = [np.array(a).tolist() for a in arrs]
+        return out
+
+    @staticmethod
+    def _from_list_points(points: Dict[str, List[list]], dtype: np.dtype) -> Dict[str, List[np.ndarray]]:
+        out: Dict[str, List[np.ndarray]] = {}
+        for cid, arrs in (points or {}).items():
+            out[cid] = [np.array(a, dtype=dtype) for a in arrs]
+        return out
+
+    @staticmethod
+    def _sanitize_resume_policy(policy: str | None) -> str:
+        value = str(policy or "manual").lower().strip()
+        return value if value in {"manual", "timeout"} else "manual"
+
+    def _session_payload(self) -> dict:
+        return {
+            "active": bool(self.session.active),
+            "camera_ids": list(self.session.camera_ids),
+            "object_points": self._to_list_points(self.session.object_points),
+            "image_points": self._to_list_points(self.session.image_points),
+            "image_sizes": {cid: [int(size[0]), int(size[1])] for cid, size in self.session.image_sizes.items()},
+            "captures": int(self.session.captures),
+            "report": dict(self.session.report or {}),
+            "failure_streak": int(self.session.failure_streak),
+            "recommended_fps_cap": self.session.recommended_fps_cap,
+            "sync_skew_history_ms": [float(v) for v in self.session.sync_skew_history_ms],
+            "last_accept_ts_ms": self.session.last_accept_ts_ms,
+            "last_accept_pose": self.session.last_accept_pose,
+            "stable_since_ts_ms": self.session.stable_since_ts_ms,
+            "last_readiness_metrics": dict(self.session.last_readiness_metrics or {}),
+            "last_pose_sample": self.session.last_pose_sample,
+            "resume_pending": bool(self.session.resume_pending),
+            "resume_policy": str(self.session.resume_policy),
+            "resume_deadline_ts_ms": self.session.resume_deadline_ts_ms,
+            "resume_snapshot_ts_ms": self.session.resume_snapshot_ts_ms,
+            "resume_auto_reset": bool(self.session.resume_auto_reset),
+            "resume_reason": self.session.resume_reason,
+        }
+
+    def _save_session_snapshot(self) -> None:
+        if self._session_state_path is None:
+            return
+        if not self.session.active and not self.session.resume_pending:
+            save_json_atomic(self._session_state_path, {"active": False})
+            return
+        payload = self._session_payload()
+        save_json_atomic(self._session_state_path, payload)
+
+    def _restore_session_snapshot(self) -> None:
+        if self._session_state_path is None:
+            return
+        payload = load_json(self._session_state_path, default={"active": False})
+        if not isinstance(payload, dict) or not bool(payload.get("active", False)):
+            return
+        now_ms = time.time() * 1000.0
+        policy = self._sanitize_resume_policy(self.cfg.calibration.resume_policy)
+        deadline = (
+            now_ms + (1000.0 * float(self.cfg.calibration.resume_timeout_s))
+            if policy == "timeout"
+            else None
+        )
+        self.session = CalibrationSession(
+            active=True,
+            camera_ids=[str(v) for v in payload.get("camera_ids", [])],
+            object_points=self._from_list_points(payload.get("object_points", {}), np.float32),
+            image_points=self._from_list_points(payload.get("image_points", {}), np.float32),
+            image_sizes={
+                str(cid): (int(size[0]), int(size[1]))
+                for cid, size in (payload.get("image_sizes", {}) or {}).items()
+                if isinstance(size, (list, tuple)) and len(size) == 2
+            },
+            captures=int(payload.get("captures", 0)),
+            report=dict(payload.get("report", {}) or {}),
+            failure_streak=int(payload.get("failure_streak", 0)),
+            recommended_fps_cap=payload.get("recommended_fps_cap"),
+            sync_skew_history_ms=[float(v) for v in payload.get("sync_skew_history_ms", [])],
+            last_accept_ts_ms=payload.get("last_accept_ts_ms"),
+            last_accept_pose=payload.get("last_accept_pose"),
+            stable_since_ts_ms=payload.get("stable_since_ts_ms"),
+            last_readiness_metrics=dict(payload.get("last_readiness_metrics", {}) or {}),
+            last_pose_sample=payload.get("last_pose_sample"),
+            resume_pending=True,
+            resume_policy=policy,
+            resume_deadline_ts_ms=deadline,
+            resume_snapshot_ts_ms=now_ms,
+            resume_auto_reset=False,
+            resume_reason="server_restart",
+        )
+        self._save_session_snapshot()
+
+    def _resume_connectivity_status(self) -> dict:
+        camera_ids = list(self.session.camera_ids)
+        diag = self.capture_hub.get_frame_diagnostics(
+            camera_ids,
+            max(1, int(self.cfg.runtime.max_latency_ms)),
+        )
+        per_camera = diag.get("per_camera", {})
+        connected_ids = [cid for cid in camera_ids if bool(per_camera.get(cid, {}).get("connected", False))]
+        missing_ids = [cid for cid in camera_ids if cid not in connected_ids]
+        return {
+            "connected_ids": connected_ids,
+            "missing_ids": missing_ids,
+            "all_connected": len(missing_ids) == 0 and len(camera_ids) > 0,
+            "per_camera": per_camera,
+        }
+
+    def _activate_resumed_session(self, reason: str) -> None:
+        self.session.resume_pending = False
+        self.session.resume_deadline_ts_ms = None
+        self.session.resume_auto_reset = False
+        self.session.resume_reason = reason
+        self._save_session_snapshot()
+
+    def _reset_resumed_session(self, reason: str) -> None:
+        self.session = CalibrationSession(
+            active=False,
+            resume_pending=False,
+            resume_policy=self._sanitize_resume_policy(self.cfg.calibration.resume_policy),
+            resume_reason=reason,
+        )
+        self._save_session_snapshot()
+
+    def _apply_resume_policy(self) -> None:
+        if not self.session.resume_pending:
+            return
+        status = self._resume_connectivity_status()
+        if self.session.resume_policy == "timeout":
+            now_ms = time.time() * 1000.0
+            if status["all_connected"]:
+                self._activate_resumed_session("auto_resumed")
+                return
+            deadline = self.session.resume_deadline_ts_ms
+            if deadline is not None and now_ms >= float(deadline):
+                self.session.resume_auto_reset = True
+                self._reset_resumed_session("resume_timeout_reset")
+
+    def resume_status(self) -> Dict:
+        if not self.session.resume_pending:
+            return {
+                "resume_pending": False,
+                "policy": self._sanitize_resume_policy(self.cfg.calibration.resume_policy),
+                "timeout_s": int(self.cfg.calibration.resume_timeout_s),
+            }
+        self._apply_resume_policy()
+        if not self.session.resume_pending:
+            return {
+                "resume_pending": False,
+                "policy": self._sanitize_resume_policy(self.cfg.calibration.resume_policy),
+                "timeout_s": int(self.cfg.calibration.resume_timeout_s),
+                "resolved_reason": self.session.resume_reason,
+            }
+        status = self._resume_connectivity_status()
+        now_ms = time.time() * 1000.0
+        remaining_ms = None
+        if self.session.resume_policy == "timeout" and self.session.resume_deadline_ts_ms is not None:
+            remaining_ms = max(0, int(float(self.session.resume_deadline_ts_ms) - now_ms))
+        return {
+            "resume_pending": True,
+            "policy": self.session.resume_policy,
+            "timeout_s": int(self.cfg.calibration.resume_timeout_s),
+            "deadline_ts_ms": self.session.resume_deadline_ts_ms,
+            "remaining_ms": remaining_ms,
+            "camera_ids": list(self.session.camera_ids),
+            "connected_ids": status["connected_ids"],
+            "missing_ids": status["missing_ids"],
+            "all_connected": bool(status["all_connected"]),
+            "captures": int(self.session.captures),
+            "reason": self.session.resume_reason,
+        }
+
+    def resume_continue(self) -> Dict:
+        self._apply_resume_policy()
+        if not self.session.resume_pending:
+            return {"ok": False, "resume_pending": False, "reason": "no_resume_pending"}
+        status = self._resume_connectivity_status()
+        if not status["all_connected"]:
+            return {
+                "ok": False,
+                "resume_pending": True,
+                "reason": "not_all_cameras_reconnected",
+                "missing_ids": status["missing_ids"],
+            }
+        self._activate_resumed_session("manual_resumed")
+        return {
+            "ok": True,
+            "resume_pending": False,
+            "reason": "manual_resumed",
+            "captures": int(self.session.captures),
+            "camera_ids": list(self.session.camera_ids),
+        }
+
+    def resume_reset(self) -> Dict:
+        self._reset_resumed_session("manual_reset")
+        return {"ok": True, "resume_pending": False, "reason": "manual_reset"}
 
     def _detect_many(
         self,
@@ -142,6 +357,7 @@ class CalibrationService:
     def start(self, camera_ids: List[str]) -> Dict:
         if len(camera_ids) < 2:
             raise ValueError("Calibration requires at least 2 cameras.")
+        policy = self._sanitize_resume_policy(self.cfg.calibration.resume_policy)
         self.session = CalibrationSession(
             active=True,
             camera_ids=list(camera_ids),
@@ -149,7 +365,14 @@ class CalibrationService:
             image_points={cid: [] for cid in camera_ids},
             report={},
             recommended_fps_cap=self.cfg.ingest.client_fps_cap,
+            resume_pending=False,
+            resume_policy=policy,
+            resume_deadline_ts_ms=None,
+            resume_snapshot_ts_ms=time.time() * 1000.0,
+            resume_auto_reset=False,
+            resume_reason="started",
         )
+        self._save_session_snapshot()
         return {"ok": True, "camera_ids": camera_ids}
 
     def _compute_effective_latency_ms(self) -> int:
@@ -326,7 +549,9 @@ class CalibrationService:
         return True, None
 
     def readiness(self) -> Dict:
+        self._apply_resume_policy()
         if not self.session.active:
+            resume = self.resume_status()
             return {
                 "active": False,
                 "camera_ids": [],
@@ -345,10 +570,37 @@ class CalibrationService:
                     "board_quality_ok_by_camera": {},
                 },
                 "capture_block_reason": "session_inactive",
+                "resume": resume,
             }
 
         camera_ids = self.session.camera_ids
         effective_latency_ms = self._compute_effective_latency_ms()
+        if self.session.resume_pending:
+            frame_diag_pending = self.capture_hub.get_frame_diagnostics(camera_ids, effective_latency_ms)
+            resume = self.resume_status()
+            return {
+                "active": True,
+                "camera_ids": camera_ids,
+                "per_camera": frame_diag_pending["per_camera"],
+                "all_cameras_ready": False,
+                "effective_latency_ms": effective_latency_ms,
+                "sync_skew_ms": frame_diag_pending["sync_skew_ms"],
+                "recommended_fps_cap": self.session.recommended_fps_cap,
+                "captures": self.session.captures,
+                "required": self.cfg.calibration.min_captures,
+                "board_metrics": {
+                    "centroid_xy_norm": None,
+                    "board_area_norm": None,
+                    "quality_ok": False,
+                    "pose_delta": None,
+                    "stable_ms": 0.0,
+                    "board_area_norm_by_camera": {},
+                    "board_quality_ok_by_camera": {},
+                },
+                "capture_block_reason": "resume_pending",
+                "resume": resume,
+            }
+
         frame_diag = self.capture_hub.get_frame_diagnostics(camera_ids, effective_latency_ms)
         latest_frames = self.capture_hub.get_latest_frames(camera_ids)
         chess_cols, chess_rows = self.cfg.calibration.chessboard
@@ -437,14 +689,28 @@ class CalibrationService:
             "required": self.cfg.calibration.min_captures,
             "board_metrics": board_metrics,
             "capture_block_reason": capture_block_reason,
+            "resume": self.resume_status(),
         }
 
     def capture(self, mode: str = "manual") -> Dict:
         mode = (mode or "manual").lower()
         if mode not in {"manual", "auto"}:
             mode = "manual"
+        self._apply_resume_policy()
         if not self.session.active:
             raise RuntimeError("Calibration session is not active.")
+        if self.session.resume_pending:
+            resume = self.resume_status()
+            return {
+                "ok": False,
+                "accepted": False,
+                "capture_mode": mode,
+                "rejection_reason": "resume_pending",
+                "reason": "resume_pending",
+                "captures": self.session.captures,
+                "required": self.cfg.calibration.min_captures,
+                "resume": resume,
+            }
         effective_latency_ms = self._compute_effective_latency_ms()
         frames = self.capture_hub.get_synced_frames(
             min_sources=len(self.session.camera_ids),
@@ -458,6 +724,7 @@ class CalibrationService:
         if not all(cid in frames for cid in self.session.camera_ids):
             self.session.failure_streak += 1
             self._maybe_downshift_fps()
+            self._save_session_snapshot()
             return {
                 "ok": False,
                 "accepted": False,
@@ -494,6 +761,7 @@ class CalibrationService:
             per_camera[cid]["board_quality_ok"] = False
             if not found or corners is None:
                 self.session.failure_streak = 0
+                self._save_session_snapshot()
                 return {
                     "ok": False,
                     "accepted": False,
@@ -552,6 +820,7 @@ class CalibrationService:
         }
         if not accepted:
             self.session.failure_streak = 0
+            self._save_session_snapshot()
             return {
                 "ok": False,
                 "accepted": False,
@@ -575,6 +844,7 @@ class CalibrationService:
         self.session.failure_streak = 0
         self.session.last_accept_ts_ms = now_ms
         self.session.last_accept_pose = None if aggregate_pose is None else dict(aggregate_pose)
+        self._save_session_snapshot()
         return {
             "ok": True,
             "accepted": True,
@@ -648,13 +918,16 @@ class CalibrationService:
             "calibration_score": self._score_calibration(rms_by_camera, pair_rms, store),
             "path": str(path),
         }
+        self._save_session_snapshot()
         return self.session.report
 
     def report(self) -> Dict:
+        self._apply_resume_policy()
         return {
             "active": self.session.active,
             "camera_ids": self.session.camera_ids,
             "captures": self.session.captures,
             "recommended_fps_cap": self.session.recommended_fps_cap,
             "result": self.session.report,
+            "resume": self.resume_status(),
         }

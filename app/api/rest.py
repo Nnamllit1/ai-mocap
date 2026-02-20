@@ -282,6 +282,33 @@ def calibration_readiness(request: Request):
     return runtime.calibration_service.readiness()
 
 
+@router.get("/calibration/resume/status")
+def calibration_resume_status(request: Request):
+    runtime = _runtime(request)
+    require_http_token(request, runtime.config_store.config.server.token)
+    return runtime.calibration_service.resume_status()
+
+
+@router.post("/calibration/resume/continue")
+def calibration_resume_continue(request: Request):
+    runtime = _runtime(request)
+    require_http_token(request, runtime.config_store.config.server.token)
+    out = runtime.calibration_service.resume_continue()
+    if not bool(out.get("ok", False)):
+        raise HTTPException(status_code=400, detail=str(out.get("reason", "resume_continue_failed")))
+    return out
+
+
+@router.post("/calibration/resume/reset")
+def calibration_resume_reset(request: Request):
+    runtime = _runtime(request)
+    require_http_token(request, runtime.config_store.config.server.token)
+    out = runtime.calibration_service.resume_reset()
+    if not bool(out.get("ok", False)):
+        raise HTTPException(status_code=400, detail=str(out.get("reason", "resume_reset_failed")))
+    return out
+
+
 @router.get("/calibration/checkerboard.pdf")
 def calibration_checkerboard_pdf(request: Request):
     runtime = _runtime(request)
