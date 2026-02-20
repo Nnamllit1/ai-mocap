@@ -27,6 +27,11 @@ class RuntimeConfig(BaseModel):
     missing_joint_hold_ms: int = 250
     max_joint_jump_m: float = 0.35
     jump_reject_conf: float = 0.85
+    bone_length_guard_enabled: bool = True
+    bone_length_soft_rel_tol: float = 0.15
+    bone_length_hard_rel_tol: float = 0.35
+    bone_length_ema_alpha: float = 0.2
+    bone_length_learn_conf: float = 0.65
 
 
 class TriangulationConfig(BaseModel):

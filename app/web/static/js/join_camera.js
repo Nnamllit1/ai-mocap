@@ -38,6 +38,7 @@
   const helpMessage = document.getElementById("help-message");
   const wizardNote = document.getElementById("wizard-note");
   const labelInput = document.getElementById("camera-label");
+  const cameraDeviceSelect = document.getElementById("camera-device");
   const fpsInput = document.getElementById("fps");
   const qualityInput = document.getElementById("quality");
   const ticketId = window.JOIN_TICKET;
@@ -47,6 +48,7 @@
 
   const DEVICE_KEY = "mocap_device_uid";
   const LABEL_KEY = "mocap_device_label";
+  const CAMERA_DEVICE_KEY = "mocap_camera_device_id";
 
   let ws = null;
   let stream = null;
@@ -57,6 +59,188 @@
   let reconnectTimer = null;
   let reconnectAttempts = 0;
   let shouldAutoReconnect = false;
+  let reconnectRefreshInFlight = false;
+
+  function stopTracks(mediaStream) {
+    if (!mediaStream) return;
+    mediaStream.getTracks().forEach((t) => t.stop());
+  }
+
+  function buildVideoConstraints(deviceId = null) {
+    const videoConstraints = {
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    };
+    if (deviceId) {
+      videoConstraints.deviceId = { exact: String(deviceId) };
+    } else {
+      videoConstraints.facingMode = { ideal: "environment" };
+    }
+    return { video: videoConstraints, audio: false };
+  }
+
+  function scoreCameraLabel(label) {
+    const value = String(label || "").toLowerCase();
+    let score = 0;
+    if (/back|rear|environment|world/.test(value)) score += 35;
+    if (/wide|main|normal|standard|1x/.test(value)) score += 45;
+    if (/tele|zoom|periscope|3x|5x|10x/.test(value)) score -= 60;
+    if (/macro|depth|bokeh|mono|infrared|tof/.test(value)) score -= 30;
+    if (/front|selfie/.test(value)) score -= 120;
+    return score;
+  }
+
+  function isLikelyFrontCameraLabel(label) {
+    return /front|selfie|user/i.test(String(label || ""));
+  }
+
+  async function listVideoInputDevices() {
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== "function") {
+      return [];
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return devices.filter((d) => d.kind === "videoinput");
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function renderCameraDeviceOptionLabel(device, index) {
+    const raw = String(device?.label || "").trim();
+    if (raw) return raw;
+    return `Camera ${index + 1}`;
+  }
+
+  async function refreshCameraDeviceOptions(preferredValue = null) {
+    if (!cameraDeviceSelect) return;
+    const previous = String(
+      preferredValue ?? cameraDeviceSelect.value ?? localStorage.getItem(CAMERA_DEVICE_KEY) ?? "auto"
+    );
+    const devices = await listVideoInputDevices();
+    cameraDeviceSelect.innerHTML = "";
+    const autoOption = document.createElement("option");
+    autoOption.value = "auto";
+    autoOption.textContent = "Auto (back camera)";
+    cameraDeviceSelect.appendChild(autoOption);
+    devices.forEach((device, index) => {
+      const option = document.createElement("option");
+      option.value = String(device.deviceId);
+      option.textContent = renderCameraDeviceOptionLabel(device, index);
+      cameraDeviceSelect.appendChild(option);
+    });
+
+    const known = new Set(["auto", ...devices.map((d) => String(d.deviceId))]);
+    const nextValue = known.has(previous) ? previous : "auto";
+    cameraDeviceSelect.value = nextValue;
+    localStorage.setItem(CAMERA_DEVICE_KEY, nextValue);
+  }
+
+  function normalizeCapabilitiesZoom(caps) {
+    if (!caps || caps.zoom == null) return null;
+    if (Array.isArray(caps.zoom) && caps.zoom.length > 0) {
+      const nums = caps.zoom.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+      if (!nums.length) return null;
+      return { min: Math.min(...nums), max: Math.max(...nums), step: null };
+    }
+    if (typeof caps.zoom === "object") {
+      const min = Number(caps.zoom.min);
+      const max = Number(caps.zoom.max);
+      const step = Number(caps.zoom.step);
+      if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+      return { min, max, step: Number.isFinite(step) ? step : null };
+    }
+    return null;
+  }
+
+  async function forceMinimumZoom(mediaStream) {
+    const track = mediaStream?.getVideoTracks?.()[0];
+    if (!track || typeof track.getCapabilities !== "function") return;
+    try {
+      const zoomCaps = normalizeCapabilitiesZoom(track.getCapabilities());
+      if (!zoomCaps || !Number.isFinite(zoomCaps.min)) return;
+      const settings = typeof track.getSettings === "function" ? track.getSettings() : {};
+      const currentZoom = Number(settings?.zoom);
+      if (Number.isFinite(currentZoom) && currentZoom <= zoomCaps.min + 1e-3) return;
+      await track.applyConstraints({ advanced: [{ zoom: zoomCaps.min }] });
+    } catch (_) {}
+  }
+
+  function preferredCandidateDevices(devices) {
+    const all = devices.map((device) => ({
+      deviceId: String(device.deviceId || ""),
+      label: String(device.label || ""),
+      score: scoreCameraLabel(device.label || ""),
+    }));
+    const backOnly = all.filter((c) => !isLikelyFrontCameraLabel(c.label));
+    return (backOnly.length ? backOnly : all).sort((a, b) => b.score - a.score);
+  }
+
+  async function probeDeviceZoomMin(deviceId) {
+    let tmp = null;
+    try {
+      tmp = await getMediaStream(buildVideoConstraints(deviceId));
+      const track = tmp.getVideoTracks()[0];
+      if (!track) return Number.POSITIVE_INFINITY;
+      const caps = typeof track.getCapabilities === "function" ? track.getCapabilities() : null;
+      const settings = typeof track.getSettings === "function" ? track.getSettings() : {};
+      const zoomCaps = normalizeCapabilitiesZoom(caps);
+      if (zoomCaps && Number.isFinite(zoomCaps.min)) return Number(zoomCaps.min);
+      const z = Number(settings?.zoom);
+      if (Number.isFinite(z)) return z;
+      return Number.POSITIVE_INFINITY;
+    } catch (_) {
+      return Number.POSITIVE_INFINITY;
+    } finally {
+      stopTracks(tmp);
+    }
+  }
+
+  async function pickPreferredBackDeviceId() {
+    const devices = await listVideoInputDevices();
+    if (!devices.length) return null;
+    const candidates = preferredCandidateDevices(devices);
+    if (!candidates.length) return null;
+    if (candidates.length === 1) return candidates[0].deviceId;
+
+    const topProbe = candidates.slice(0, Math.min(4, candidates.length));
+    const probed = [];
+    for (const candidate of topProbe) {
+      const zoomMin = await probeDeviceZoomMin(candidate.deviceId);
+      probed.push({ ...candidate, zoomMin });
+    }
+    probed.sort((a, b) => {
+      const az = Number.isFinite(a.zoomMin) ? a.zoomMin : Number.POSITIVE_INFINITY;
+      const bz = Number.isFinite(b.zoomMin) ? b.zoomMin : Number.POSITIVE_INFINITY;
+      if (az !== bz) return az - bz;
+      return b.score - a.score;
+    });
+    const best = probed[0];
+    if (best && best.deviceId) return best.deviceId;
+    return candidates[0].deviceId;
+  }
+
+  async function openPreferredCameraStream(selectedDeviceId = "auto") {
+    const selected = String(selectedDeviceId || "auto");
+    if (selected !== "auto") {
+      const explicit = await getMediaStream(buildVideoConstraints(selected));
+      await forceMinimumZoom(explicit);
+      return explicit;
+    }
+
+    const preferredDeviceId = await pickPreferredBackDeviceId();
+    if (preferredDeviceId) {
+      try {
+        const picked = await getMediaStream(buildVideoConstraints(preferredDeviceId));
+        await forceMinimumZoom(picked);
+        return picked;
+      } catch (_) {}
+    }
+
+    const fallback = await getMediaStream(buildVideoConstraints(null));
+    await forceMinimumZoom(fallback);
+    return fallback;
+  }
 
   function setState(state, message) {
     statusEl.textContent = `${state}${message ? `: ${message}` : ""}`;
@@ -263,7 +447,22 @@
     return data;
   }
 
+  async function refreshRegistrationForReconnect() {
+    setState(STATES.RETRYING, "refreshing camera auth");
+    try {
+      const registration = await registerCamera();
+      return registration;
+    } catch (err) {
+      shouldAutoReconnect = false;
+      const msg = String(err?.message || err || "register_failed");
+      setState(STATES.ERROR, `reconnect auth failed: ${msg}`);
+      showHelp("Camera auth expired. Open a fresh invite link and tap Join + Stream again.");
+      return null;
+    }
+  }
+
   function openSocket(registration) {
+    let opened = false;
     lastRegistration = registration;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -285,6 +484,7 @@
     ws = new WebSocket(registration.ws_url);
     ws.binaryType = "arraybuffer";
     ws.onopen = () => {
+      opened = true;
       reconnectAttempts = 0;
       setState(STATES.STREAMING, assignedCameraId || "connected");
       if (recordingHintEl) {
@@ -323,6 +523,22 @@
         setState(STATES.ERROR, "disconnected");
         return;
       }
+      if (!opened && reconnectAttempts >= 1) {
+        if (reconnectRefreshInFlight) {
+          return;
+        }
+        reconnectRefreshInFlight = true;
+        refreshRegistrationForReconnect()
+          .then((registration) => {
+            if (!registration || !shouldAutoReconnect) return;
+            reconnectAttempts = 0;
+            openSocket(registration);
+          })
+          .finally(() => {
+            reconnectRefreshInFlight = false;
+          });
+        return;
+      }
       const delayMs = Math.min(8000, 500 * (2 ** reconnectAttempts));
       reconnectAttempts += 1;
       setState(STATES.RETRYING, `reconnect in ${Math.round(delayMs / 1000)}s`);
@@ -357,7 +573,7 @@
     }
     ws = null;
     if (stream) {
-      stream.getTracks().forEach((t) => t.stop());
+      stopTracks(stream);
       stream = null;
     }
   }
@@ -405,11 +621,32 @@
 
   async function startStreaming() {
     setState(STATES.PERMISSION);
-    stream = await getMediaStream({ video: { facingMode: "environment" }, audio: false });
+    const selectedLens = String(
+      cameraDeviceSelect?.value || localStorage.getItem(CAMERA_DEVICE_KEY) || "auto"
+    );
+    stream = await openPreferredCameraStream(selectedLens);
     video.srcObject = stream;
     await video.play();
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
+
+    const activeTrack = stream.getVideoTracks()[0] || null;
+    const activeSettings = typeof activeTrack?.getSettings === "function" ? activeTrack.getSettings() : {};
+    const activeDeviceId = String(activeSettings?.deviceId || "");
+    await refreshCameraDeviceOptions(selectedLens === "auto" ? "auto" : activeDeviceId || selectedLens);
+    if (activeTrack && recordingHintEl) {
+      const activeZoom = Number(activeSettings?.zoom);
+      const zoomText = Number.isFinite(activeZoom) ? ` | zoom ${activeZoom.toFixed(2)}` : "";
+      const label = activeTrack.label || "camera";
+      const looksZoomed =
+        /tele|zoom|periscope|macro/i.test(label) ||
+        (Number.isFinite(activeZoom) && activeZoom > 1.2);
+      const hintSuffix =
+        looksZoomed && selectedLens === "auto"
+          ? " | If view is too zoomed, choose a different Lens and retry."
+          : "";
+      recordingHintEl.textContent = `Lens: ${label}${zoomText}${hintSuffix}`;
+    }
 
     setState(STATES.REGISTERING);
     const registration = await registerCamera();
@@ -451,6 +688,15 @@
   }
 
   labelInput.value = localStorage.getItem(LABEL_KEY) || labelInput.value || "";
+  if (cameraDeviceSelect) {
+    const savedLens = String(localStorage.getItem(CAMERA_DEVICE_KEY) || "auto");
+    cameraDeviceSelect.value = savedLens;
+    cameraDeviceSelect.addEventListener("change", () => {
+      const selected = String(cameraDeviceSelect.value || "auto");
+      localStorage.setItem(CAMERA_DEVICE_KEY, selected);
+    });
+    refreshCameraDeviceOptions(savedLens).catch(() => {});
+  }
 
   startBtn?.addEventListener("click", async () => {
     await startJoinFlow();

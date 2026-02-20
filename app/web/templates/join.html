@@ -20,6 +20,18 @@
       <label>FPS <input id="fps" type="number" value="15"></label>
       <label>JPEG quality <input id="quality" type="number" value="70" min="30" max="95"></label>
     </div>
+    <details class="join-advanced">
+      <summary><span>Advanced</span></summary>
+      <div class="inline join-controls join-advanced-body">
+        <label class="camera-device-label">Lens
+          <div class="camera-select-wrap">
+            <select id="camera-device">
+              <option value="auto">Auto (back camera)</option>
+            </select>
+          </div>
+        </label>
+      </div>
+    </details>
     <div class="actions join-actions">
       <button id="start-btn" {% if not valid_ticket %}disabled{% endif %}>Join + Stream</button>
       <button id="stop-btn">Stop</button>
@@ -75,7 +87,7 @@
     window.VALID_TICKET = "{{ '1' if valid_ticket else '0' }}";
   </script>
   <script src="/static/js/wake_lock.js"></script>
-  <script src="/static/js/join_camera.js"></script>
+  <script src="/static/js/join_camera.js?v=20260220d"></script>
 </body>
 </html>
 

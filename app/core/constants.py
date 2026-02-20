@@ -17,3 +17,20 @@ COCO_JOINTS = [
     "left_ankle",
     "right_ankle",
 ]
+
+# Directed torso/limb constraints for runtime bone-length guarding.
+# Tuple order is anchor -> distal and is used as tie-breaker in corrections.
+TRACKING_BONE_EDGES = [
+    (5, 7),
+    (7, 9),
+    (6, 8),
+    (8, 10),
+    (11, 13),
+    (13, 15),
+    (12, 14),
+    (14, 16),
+    (11, 5),
+    (12, 6),
+    (11, 12),
+    (5, 6),
+]

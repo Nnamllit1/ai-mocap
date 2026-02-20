@@ -37,6 +37,8 @@ class SessionState:
     last_active_camera_ids: list[str] = field(default_factory=list)
     joint_conf_avg: float | None = None
     last_joint_states: dict = field(default_factory=dict)
+    bone_guard_clamped_count: int = 0
+    bone_guard_rejected_count: int = 0
 
 
 class SessionManager:
@@ -121,6 +123,8 @@ class SessionManager:
             "last_active_camera_ids": self.state.last_active_camera_ids,
             "joint_conf_avg": self.state.joint_conf_avg,
             "last_joint_states": self.state.last_joint_states,
+            "bone_guard_clamped_count": self.state.bone_guard_clamped_count,
+            "bone_guard_rejected_count": self.state.bone_guard_rejected_count,
         }
 
     def _run_loop(self) -> None:
@@ -133,6 +137,11 @@ class SessionManager:
                 self.cfg.runtime.missing_joint_hold_ms,
                 self.cfg.runtime.max_joint_jump_m,
                 self.cfg.runtime.jump_reject_conf,
+                self.cfg.runtime.bone_length_guard_enabled,
+                self.cfg.runtime.bone_length_soft_rel_tol,
+                self.cfg.runtime.bone_length_hard_rel_tol,
+                self.cfg.runtime.bone_length_ema_alpha,
+                self.cfg.runtime.bone_length_learn_conf,
             )
             osc_sink = BlenderOscSink(self.cfg.osc)
             exporter = ExportManager(self.cfg.export)
@@ -153,6 +162,8 @@ class SessionManager:
                     self.state.active_cameras = 0
                     self.state.valid_joints = 0
                     self.state.joint_conf_avg = None
+                    self.state.bone_guard_clamped_count = 0
+                    self.state.bone_guard_rejected_count = 0
                     self.state.dropped_cycles += 1
                     time.sleep(0.01)
                     continue
@@ -207,6 +218,12 @@ class SessionManager:
                 stable_confidences = {
                     idx: float(entry["confidence"]) for idx, entry in joint_states.items()
                 }
+                self.state.bone_guard_clamped_count = (
+                    state_tracker.last_bone_guard_clamped_count
+                )
+                self.state.bone_guard_rejected_count = (
+                    state_tracker.last_bone_guard_rejected_count
+                )
                 for idx, entry in joint_states.items():
                     state = str(entry.get("state", ""))
                     if state in {"measured", "single_view"}:

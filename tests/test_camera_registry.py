@@ -66,6 +66,19 @@ class CameraRegistryTests(unittest.TestCase):
             self.assertTrue(reg.soft_delete(rec.camera_id))
             records = reg.list_records()
             self.assertEqual(len(records), 0)
+            self.assertFalse(reg.is_known_device_uid("d2"))
+
+    def test_is_known_device_uid_for_active_record(self):
+        reg = CameraRegistry()
+        self.assertFalse(reg.is_known_device_uid("missing"))
+        rec = reg.upsert_from_device(
+            device_uid="d3",
+            device_name="Android",
+            platform="android",
+            label="Phone C",
+        )
+        self.assertIsNotNone(rec.camera_id)
+        self.assertTrue(reg.is_known_device_uid("d3"))
 
 
 if __name__ == "__main__":

@@ -171,6 +171,17 @@ class CameraRegistry:
                 return None
             return CameraRecord(**rec.__dict__)
 
+    def is_known_device_uid(self, device_uid: str) -> bool:
+        key = str(device_uid or "")
+        if not key:
+            return False
+        with self._lock:
+            camera_id = self._device_to_camera.get(key)
+            if not camera_id:
+                return False
+            rec = self._records.get(camera_id)
+            return bool(rec is not None and not rec.deleted)
+
     def set_connected(self, camera_id: str, connected: bool) -> None:
         with self._lock:
             rec = self._records.get(camera_id)

@@ -151,7 +151,8 @@ button {
   text-decoration: none;
 }
 
-input {
+input,
+select {
   width: 100%;
   border: 1px solid #ccd9e8;
   border-radius: 8px;
@@ -312,6 +313,96 @@ video {
   margin-bottom: 0.7rem;
 }
 
+.join-advanced {
+  border: 1px solid #d0deef;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f8fbff 0%, #f3f8ff 100%);
+  padding: 0.45rem 0.7rem 0.55rem 0.7rem;
+  margin: 0.55rem 0 0.7rem 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.join-advanced summary {
+  list-style: none;
+  cursor: pointer;
+  color: #34506f;
+  font-weight: 700;
+  margin-bottom: 0;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+}
+
+.join-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.join-advanced summary::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid #57789f;
+  border-bottom: 2px solid #57789f;
+  transform: rotate(45deg) translateY(-1px);
+  transition: transform 150ms ease;
+}
+
+.join-advanced[open] summary::after {
+  transform: rotate(-135deg) translateY(-1px);
+}
+
+.join-advanced-body {
+  margin-top: 0.35rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid #d8e5f5;
+}
+
+.camera-device-label {
+  min-width: 240px;
+  flex: 1 1 260px;
+}
+
+.camera-select-wrap {
+  position: relative;
+}
+
+.camera-select-wrap::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  right: 0.8rem;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #5a7595;
+  border-bottom: 2px solid #5a7595;
+  transform: translateY(-60%) rotate(45deg);
+}
+
+#camera-device {
+  appearance: none;
+  -webkit-appearance: none;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%);
+  border: 1px solid #b9cde5;
+  border-radius: 10px;
+  color: #173351;
+  font-weight: 600;
+  padding-right: 2.2rem;
+  box-shadow: 0 1px 2px rgba(18, 45, 75, 0.06);
+}
+
+#camera-device:hover {
+  border-color: #9cb8d8;
+}
+
+#camera-device:focus {
+  outline: none;
+  border-color: #5a9ae0;
+  box-shadow: 0 0 0 3px rgba(90, 154, 224, 0.2);
+}
+
 .wizard {
   border: 1px solid #dbe5f2;
   border-radius: 10px;
@@ -455,6 +546,9 @@ video {
   }
   .copy-row button,
   .retry-row button {
+    min-width: 100%;
+  }
+  .camera-device-label {
     min-width: 100%;
   }
 }

@@ -29,6 +29,11 @@
         missing_joint_hold_ms: num("runtime-missing-hold"),
         max_joint_jump_m: num("runtime-max-jump"),
         jump_reject_conf: num("runtime-jump-conf"),
+        bone_length_guard_enabled: checked("runtime-bone-guard-enabled"),
+        bone_length_soft_rel_tol: num("runtime-bone-soft-tol"),
+        bone_length_hard_rel_tol: num("runtime-bone-hard-tol"),
+        bone_length_ema_alpha: num("runtime-bone-ema"),
+        bone_length_learn_conf: num("runtime-bone-learn-conf"),
       },
       triangulation: {
         min_views: num("tri-min-views"),

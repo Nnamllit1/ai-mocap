@@ -189,16 +189,23 @@ def get_camera_invite(request: Request, ticket_id: str):
 @router.post("/cameras/register")
 def register_camera(request: Request, payload: RegisterCameraRequest):
     runtime = _runtime(request)
+    invite = None
     try:
         invite = runtime.join_invites.consume(payload.ticket_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        reason = str(exc)
+        # Allow token refresh on the same previously registered device, even when
+        # the one-time invite has already been consumed.
+        if reason != "ticket_used" or not runtime.camera_registry.is_known_device_uid(
+            payload.device_uid
+        ):
+            raise HTTPException(status_code=400, detail=reason) from exc
 
     rec = runtime.camera_registry.upsert_from_device(
         device_uid=payload.device_uid,
         device_name=payload.device_name,
         platform=payload.platform,
-        label=payload.preferred_label or invite.preset_label,
+        label=payload.preferred_label or (invite.preset_label if invite else None),
     )
 
     ws_proto = "wss" if request.url.scheme == "https" else "ws"

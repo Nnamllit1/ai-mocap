@@ -1,5 +1,5 @@
 from __future__ import annotations
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
@@ -267,24 +267,47 @@ class CalibrationService:
     ) -> Dict[str, Tuple[bool, np.ndarray | None]]:
         if not frames_by_cam:
             return {}
-        futures = {
-            cam_id: self._detector_pool.submit(self._detect_checkerboard, frame, board_size)
+        detect_timeout_s = max(0.01, float(self._detect_timeout_s))
+        deadline_s = time.perf_counter() + detect_timeout_s
+        future_to_cam = {
+            self._detector_pool.submit(self._detect_checkerboard, frame, board_size, deadline_s): cam_id
             for cam_id, frame in frames_by_cam.items()
         }
+        done, pending = wait(list(future_to_cam.keys()), timeout=detect_timeout_s)
         out: Dict[str, Tuple[bool, np.ndarray | None]] = {}
-        for cam_id, future in futures.items():
+        for future in done:
+            cam_id = future_to_cam[future]
             try:
-                out[cam_id] = future.result(timeout=self._detect_timeout_s)
-            except FuturesTimeoutError:
-                future.cancel()
-                out[cam_id] = (False, None)
+                out[cam_id] = future.result()
             except Exception:
                 out[cam_id] = (False, None)
+        for future in pending:
+            cam_id = future_to_cam[future]
+            future.cancel()
+            out[cam_id] = (False, None)
+        for cam_id in frames_by_cam:
+            out.setdefault(cam_id, (False, None))
         return out
 
-    def _detect_checkerboard(self, frame: np.ndarray, board_size: Tuple[int, int]) -> Tuple[bool, np.ndarray | None]:
+    def _detect_checkerboard(
+        self,
+        frame: np.ndarray,
+        board_size: Tuple[int, int],
+        deadline_s: float | None = None,
+    ) -> Tuple[bool, np.ndarray | None]:
+        def _timed_out() -> bool:
+            return deadline_s is not None and time.perf_counter() >= deadline_s
+
+        if _timed_out():
+            return False, None
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        scales = (1.0, 1.5, 2.0, 2.75)
+        max_dim = max(int(gray.shape[0]), int(gray.shape[1]))
+        if max_dim >= 1600:
+            scales = (1.0, 0.75, 0.5)
+        elif max_dim >= 1200:
+            scales = (1.0, 1.25, 0.75)
+        else:
+            scales = (1.0, 1.25, 1.5)
 
         # Prefer the SB detector when available; it is more robust on perspective tilt and low contrast.
         normalize_flag = int(getattr(cv2, "CALIB_CB_NORMALIZE_IMAGE", 0))
@@ -306,7 +329,11 @@ class CalibrationService:
         )
         if callable(sb_finder):
             for processed in proc_variants:
+                if _timed_out():
+                    return False, None
                 for scale in scales:
+                    if _timed_out():
+                        return False, None
                     scaled = (
                         processed
                         if scale == 1.0
@@ -315,6 +342,8 @@ class CalibrationService:
                         )
                     )
                     for sb_flags in sb_flag_sets:
+                        if _timed_out():
+                            return False, None
                         found, corners = sb_finder(scaled, board_size, sb_flags)
                         if found and corners is not None:
                             corners = corners.astype(np.float32)
@@ -328,7 +357,11 @@ class CalibrationService:
             | cv2.CALIB_CB_FILTER_QUADS
         )
         for processed in proc_variants:
+            if _timed_out():
+                return False, None
             for scale in scales:
+                if _timed_out():
+                    return False, None
                 scaled = (
                     processed
                     if scale == 1.0
