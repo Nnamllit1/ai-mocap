@@ -2,7 +2,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 import os
-from typing import Dict, List, Tuple
+import time
+from typing import Any, Dict, List, Tuple
 
 import cv2
 import numpy as np
@@ -24,6 +25,11 @@ class CalibrationSession:
     failure_streak: int = 0
     recommended_fps_cap: int | None = None
     sync_skew_history_ms: List[float] = field(default_factory=list)
+    last_accept_ts_ms: float | None = None
+    last_accept_pose: Dict[str, float] | None = None
+    stable_since_ts_ms: float | None = None
+    last_readiness_metrics: Dict[str, Any] = field(default_factory=dict)
+    last_pose_sample: Dict[str, float] | None = None
 
 
 class CalibrationService:
@@ -245,6 +251,68 @@ class CalibrationService:
             self.session.recommended_fps_cap = lower[0]
         self.session.failure_streak = 0
 
+    def _extract_pose_metrics(self, corners: np.ndarray, frame_shape: Tuple[int, int, int]) -> Dict[str, float]:
+        h, w = frame_shape[:2]
+        corners_2d = corners.reshape(-1, 2).astype(np.float32)
+        centroid = np.mean(corners_2d, axis=0)
+        hull = cv2.convexHull(corners_2d)
+        area = float(cv2.contourArea(hull))
+        frame_area = max(1.0, float(w * h))
+        return {
+            "cx": float(centroid[0]) / float(max(1, w)),
+            "cy": float(centroid[1]) / float(max(1, h)),
+            "area": area / frame_area,
+        }
+
+    def _pose_distance(self, current: Dict[str, float] | None, previous: Dict[str, float] | None) -> float | None:
+        if not current or not previous:
+            return None
+        dx = float(current["cx"] - previous["cx"])
+        dy = float(current["cy"] - previous["cy"])
+        da = abs(float(current["area"] - previous["area"]))
+        return float(np.hypot(dx, dy) + (0.5 * da))
+
+    def _update_stability(self, pose: Dict[str, float] | None, now_ms: float) -> float:
+        stable_threshold = float(self.cfg.calibration.auto_stable_threshold_norm)
+        if pose is None:
+            self.session.stable_since_ts_ms = None
+            self.session.last_pose_sample = None
+            return 0.0
+        sample_delta = self._pose_distance(pose, self.session.last_pose_sample)
+        if self.session.stable_since_ts_ms is None:
+            self.session.stable_since_ts_ms = now_ms
+        elif sample_delta is not None and sample_delta > stable_threshold:
+            self.session.stable_since_ts_ms = now_ms
+        self.session.last_pose_sample = dict(pose)
+        return max(0.0, float(now_ms - float(self.session.stable_since_ts_ms or now_ms)))
+
+    def _evaluate_capture_gate(self, readiness_metrics: Dict[str, Any], now_ms: float, mode: str) -> Tuple[bool, str | None]:
+        mode = (mode or "manual").lower()
+        if not readiness_metrics.get("all_cameras_ready", False):
+            return False, "not_ready"
+        board_metrics = readiness_metrics.get("board_metrics", {}) or {}
+        if not board_metrics.get("quality_ok", False):
+            return False, "low_quality"
+        if mode == "manual":
+            return True, None
+
+        min_interval_ms = int(self.cfg.calibration.auto_min_interval_ms)
+        if self.session.last_accept_ts_ms is not None and (now_ms - self.session.last_accept_ts_ms) < float(min_interval_ms):
+            return False, "min_interval"
+
+        pose_delta = board_metrics.get("pose_delta")
+        if self.session.last_accept_pose is not None:
+            if pose_delta is None or float(pose_delta) < float(self.cfg.calibration.auto_motion_threshold_norm):
+                return False, "insufficient_motion"
+            if float(pose_delta) < float(self.cfg.calibration.auto_pose_delta_threshold):
+                return False, "duplicate_pose"
+
+        stable_ms = float(board_metrics.get("stable_ms", 0.0))
+        if stable_ms < float(self.cfg.calibration.auto_hold_ms):
+            return False, "not_stable"
+
+        return True, None
+
     def readiness(self) -> Dict:
         if not self.session.active:
             return {
@@ -255,6 +323,14 @@ class CalibrationService:
                 "effective_latency_ms": self._compute_effective_latency_ms(),
                 "sync_skew_ms": 0.0,
                 "recommended_fps_cap": self.session.recommended_fps_cap,
+                "board_metrics": {
+                    "centroid_xy_norm": None,
+                    "board_area_norm": None,
+                    "quality_ok": False,
+                    "pose_delta": None,
+                    "stable_ms": 0.0,
+                },
+                "capture_block_reason": "session_inactive",
             }
 
         camera_ids = self.session.camera_ids
@@ -285,6 +361,42 @@ class CalibrationService:
             and per_camera[cid]["checkerboard_detected"]
             for cid in camera_ids
         )
+        now_ms = time.time() * 1000.0
+        primary_camera_id = camera_ids[0] if camera_ids else None
+        primary_pose = None
+        if primary_camera_id:
+            frame_packet = latest_frames.get(primary_camera_id)
+            found, corners = detect_results.get(primary_camera_id, (False, None))
+            if frame_packet is not None and found and corners is not None:
+                primary_pose = self._extract_pose_metrics(corners, frame_packet.frame.shape)
+
+        stable_ms = self._update_stability(primary_pose, now_ms)
+        pose_delta = self._pose_distance(primary_pose, self.session.last_accept_pose)
+        board_area = float(primary_pose["area"]) if primary_pose else None
+        quality_ok = bool(
+            primary_pose is not None
+            and board_area is not None
+            and board_area >= float(self.cfg.calibration.auto_min_board_area_norm)
+        )
+        board_metrics = {
+            "centroid_xy_norm": None
+            if primary_pose is None
+            else [float(primary_pose["cx"]), float(primary_pose["cy"])],
+            "board_area_norm": board_area,
+            "quality_ok": quality_ok,
+            "pose_delta": pose_delta,
+            "stable_ms": stable_ms,
+        }
+        readiness_metrics = {
+            "all_cameras_ready": all_ready,
+            "board_metrics": board_metrics,
+        }
+        _, capture_block_reason = self._evaluate_capture_gate(readiness_metrics, now_ms, mode="auto")
+        self.session.last_readiness_metrics = {
+            **readiness_metrics,
+            "capture_block_reason": capture_block_reason,
+            "timestamp_ms": now_ms,
+        }
         return {
             "active": True,
             "camera_ids": camera_ids,
@@ -295,9 +407,14 @@ class CalibrationService:
             "recommended_fps_cap": self.session.recommended_fps_cap,
             "captures": self.session.captures,
             "required": self.cfg.calibration.min_captures,
+            "board_metrics": board_metrics,
+            "capture_block_reason": capture_block_reason,
         }
 
-    def capture(self) -> Dict:
+    def capture(self, mode: str = "manual") -> Dict:
+        mode = (mode or "manual").lower()
+        if mode not in {"manual", "auto"}:
+            mode = "manual"
         if not self.session.active:
             raise RuntimeError("Calibration session is not active.")
         effective_latency_ms = self._compute_effective_latency_ms()
@@ -315,6 +432,9 @@ class CalibrationService:
             self._maybe_downshift_fps()
             return {
                 "ok": False,
+                "accepted": False,
+                "capture_mode": mode,
+                "rejection_reason": "not_ready",
                 "reason": "not_all_cameras_ready",
                 "effective_latency_ms": effective_latency_ms,
                 "sync_skew_ms": frame_diag["sync_skew_ms"],
@@ -334,21 +454,75 @@ class CalibrationService:
             {cid: frames[cid].frame for cid in self.session.camera_ids},
             board_size,
         )
+        per_camera = frame_diag["per_camera"]
         for cid in self.session.camera_ids:
             frame = frames[cid].frame
             found, corners = detect_results.get(cid, (False, None))
+            per_camera[cid]["checkerboard_detected"] = bool(found and corners is not None)
             if not found or corners is None:
                 self.session.failure_streak = 0
                 return {
                     "ok": False,
+                    "accepted": False,
+                    "capture_mode": mode,
+                    "rejection_reason": "not_ready",
                     "reason": f"checkerboard_not_found:{cid}",
                     "effective_latency_ms": effective_latency_ms,
                     "sync_skew_ms": frame_diag["sync_skew_ms"],
                     "recommended_fps_cap": self.session.recommended_fps_cap,
-                    "per_camera": frame_diag["per_camera"],
+                    "per_camera": per_camera,
                 }
             corners_by_cam[cid] = corners.astype(np.float32)
             self.session.image_sizes[cid] = (frame.shape[1], frame.shape[0])
+
+        now_ms = time.time() * 1000.0
+        primary_camera_id = self.session.camera_ids[0] if self.session.camera_ids else None
+        primary_pose = None
+        if primary_camera_id is not None:
+            primary_pose = self._extract_pose_metrics(corners_by_cam[primary_camera_id], frames[primary_camera_id].frame.shape)
+        stable_ms = self._update_stability(primary_pose, now_ms)
+        pose_delta = self._pose_distance(primary_pose, self.session.last_accept_pose)
+        board_area = float(primary_pose["area"]) if primary_pose else None
+        quality_ok = bool(
+            primary_pose is not None
+            and board_area is not None
+            and board_area >= float(self.cfg.calibration.auto_min_board_area_norm)
+        )
+        board_metrics = {
+            "centroid_xy_norm": None
+            if primary_pose is None
+            else [float(primary_pose["cx"]), float(primary_pose["cy"])],
+            "board_area_norm": board_area,
+            "quality_ok": quality_ok,
+            "pose_delta": pose_delta,
+            "stable_ms": stable_ms,
+        }
+        readiness_metrics = {
+            "all_cameras_ready": True,
+            "board_metrics": board_metrics,
+        }
+        accepted, rejection_reason = self._evaluate_capture_gate(readiness_metrics, now_ms, mode=mode)
+        self.session.last_readiness_metrics = {
+            **readiness_metrics,
+            "capture_block_reason": rejection_reason,
+            "timestamp_ms": now_ms,
+        }
+        if not accepted:
+            self.session.failure_streak = 0
+            return {
+                "ok": False,
+                "accepted": False,
+                "capture_mode": mode,
+                "rejection_reason": rejection_reason,
+                "reason": "capture_gate_blocked",
+                "captures": self.session.captures,
+                "required": self.cfg.calibration.min_captures,
+                "effective_latency_ms": effective_latency_ms,
+                "sync_skew_ms": frame_diag["sync_skew_ms"],
+                "recommended_fps_cap": self.session.recommended_fps_cap,
+                "per_camera": per_camera,
+                "board_metrics": board_metrics,
+            }
 
         for cid in self.session.camera_ids:
             self.session.object_points[cid].append(objp.copy())
@@ -356,13 +530,20 @@ class CalibrationService:
 
         self.session.captures += 1
         self.session.failure_streak = 0
+        self.session.last_accept_ts_ms = now_ms
+        self.session.last_accept_pose = None if primary_pose is None else dict(primary_pose)
         return {
             "ok": True,
+            "accepted": True,
+            "capture_mode": mode,
+            "rejection_reason": None,
             "captures": self.session.captures,
+            "required": self.cfg.calibration.min_captures,
             "effective_latency_ms": effective_latency_ms,
             "sync_skew_ms": frame_diag["sync_skew_ms"],
             "recommended_fps_cap": self.session.recommended_fps_cap,
-            "per_camera": frame_diag["per_camera"],
+            "per_camera": per_camera,
+            "board_metrics": board_metrics,
         }
 
     def solve(self) -> Dict:

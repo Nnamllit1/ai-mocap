@@ -10,6 +10,7 @@ from app.api.auth import require_http_token
 from app.core.constants import COCO_JOINTS
 from app.services.checkerboard_pdf import CheckerboardSpec, generate_checkerboard_pdf
 from app.models.api import (
+    CalibrationCaptureRequest,
     CalibrationStartRequest,
     CreateInviteRequest,
     RegisterCameraRequest,
@@ -247,11 +248,12 @@ def calibration_start(request: Request, payload: CalibrationStartRequest):
 
 
 @router.post("/calibration/capture")
-def calibration_capture(request: Request):
+def calibration_capture(request: Request, payload: CalibrationCaptureRequest | None = None):
     runtime = _runtime(request)
     require_http_token(request, runtime.config_store.config.server.token)
     try:
-        return runtime.calibration_service.capture()
+        mode = payload.mode if payload is not None else "manual"
+        return runtime.calibration_service.capture(mode=mode)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

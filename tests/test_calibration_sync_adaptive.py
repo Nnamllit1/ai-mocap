@@ -1,7 +1,10 @@
 import unittest
+import time
+
+import numpy as np
 
 from app.core.calibration import CalibrationService
-from app.core.capture import CaptureHub
+from app.core.capture import CameraFrame, CaptureHub
 from app.models.config import AppConfig, CalibrationSyncConfig, RuntimeConfig
 
 
@@ -48,6 +51,81 @@ class CalibrationAdaptiveSyncTests(unittest.TestCase):
         self.assertIn("effective_latency_ms", out)
         self.assertIn("sync_skew_ms", out)
         self.assertIn("per_camera", out)
+
+    def _make_corners(self, x0: float, y0: float, step: float = 2.0) -> np.ndarray:
+        points = []
+        for y in range(6):
+            for x in range(9):
+                points.append([x0 + (x * step), y0 + (y * step)])
+        return np.array(points, dtype=np.float32).reshape(-1, 1, 2)
+
+    def _ready_service(self):
+        service = CalibrationService(self._cfg(), CaptureHub(heartbeat_timeout_s=6.0))
+        service.start(["cam_a", "cam_b"])
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        now = time.time()
+        frames = {
+            "cam_a": CameraFrame("cam_a", now, frame, 1),
+            "cam_b": CameraFrame("cam_b", now, frame, 1),
+        }
+        service.capture_hub.get_synced_frames = lambda min_sources, max_latency_ms: frames
+        service.capture_hub.get_frame_diagnostics = lambda camera_ids, max_latency_ms: {
+            "sync_skew_ms": 0.0,
+            "per_camera": {
+                cid: {"connected": True, "in_sync": True, "latest_frame_age_ms": 10.0, "seq": 1}
+                for cid in camera_ids
+            },
+        }
+        return service, frames
+
+    def test_auto_capture_rejects_when_motion_below_threshold(self):
+        service, _ = self._ready_service()
+        corners = self._make_corners(20, 20)
+        service._detect_many = lambda frames_by_cam, board_size: {cid: (True, corners) for cid in frames_by_cam}
+        pose = service._extract_pose_metrics(corners, (100, 100, 3))
+        service.session.last_accept_pose = dict(pose)
+        service.session.last_pose_sample = dict(pose)
+        service.session.stable_since_ts_ms = (time.time() * 1000.0) - 1000.0
+        service.session.last_accept_ts_ms = (time.time() * 1000.0) - 5000.0
+
+        out = service.capture(mode="auto")
+        self.assertFalse(out["ok"])
+        self.assertFalse(out["accepted"])
+        self.assertEqual(out["capture_mode"], "auto")
+        self.assertEqual(out["rejection_reason"], "insufficient_motion")
+
+    def test_auto_capture_accepts_after_movement_and_hold(self):
+        service, _ = self._ready_service()
+        corners = self._make_corners(60, 60)
+        service._detect_many = lambda frames_by_cam, board_size: {cid: (True, corners) for cid in frames_by_cam}
+        pose = service._extract_pose_metrics(corners, (100, 100, 3))
+        service.session.last_accept_pose = {"cx": 0.1, "cy": 0.1, "area": 0.02}
+        service.session.last_pose_sample = dict(pose)
+        service.session.stable_since_ts_ms = (time.time() * 1000.0) - 1000.0
+        service.session.last_accept_ts_ms = (time.time() * 1000.0) - 5000.0
+
+        out = service.capture(mode="auto")
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["accepted"])
+        self.assertEqual(out["capture_mode"], "auto")
+        self.assertIsNone(out["rejection_reason"])
+        self.assertEqual(out["captures"], 1)
+
+    def test_auto_capture_enforces_min_interval(self):
+        service, _ = self._ready_service()
+        corners = self._make_corners(60, 60)
+        service._detect_many = lambda frames_by_cam, board_size: {cid: (True, corners) for cid in frames_by_cam}
+        pose = service._extract_pose_metrics(corners, (100, 100, 3))
+        service.session.last_accept_pose = {"cx": 0.1, "cy": 0.1, "area": 0.02}
+        service.session.last_pose_sample = dict(pose)
+        service.session.stable_since_ts_ms = (time.time() * 1000.0) - 1000.0
+        service.session.last_accept_ts_ms = (time.time() * 1000.0) - 100.0
+
+        out = service.capture(mode="auto")
+        self.assertFalse(out["ok"])
+        self.assertFalse(out["accepted"])
+        self.assertEqual(out["capture_mode"], "auto")
+        self.assertEqual(out["rejection_reason"], "min_interval")
 
 
 if __name__ == "__main__":

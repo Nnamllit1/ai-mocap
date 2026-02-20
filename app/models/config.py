@@ -60,6 +60,15 @@ class CalibrationConfig(BaseModel):
     chessboard: list[int] = Field(default_factory=lambda: [9, 6])
     square_size_m: float = 0.025
     min_captures: int = 20
+    auto_enabled_default: bool = False
+    auto_poll_ms: int = 400
+    auto_min_interval_ms: int = 1200
+    auto_hold_ms: int = 450
+    auto_motion_threshold_norm: float = 0.035
+    auto_stable_threshold_norm: float = 0.010
+    auto_min_board_area_norm: float = 0.008
+    auto_pose_delta_threshold: float = 0.12
+    auto_primary_camera_strategy: str = "first_camera"
 
     @field_validator("chessboard")
     @classmethod

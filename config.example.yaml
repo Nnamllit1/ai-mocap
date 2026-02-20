@@ -44,6 +44,15 @@ calibration:
   chessboard: [9, 6]
   square_size_m: 0.025
   min_captures: 20
+  auto_enabled_default: false
+  auto_poll_ms: 400
+  auto_min_interval_ms: 1200
+  auto_hold_ms: 450
+  auto_motion_threshold_norm: 0.035
+  auto_stable_threshold_norm: 0.010
+  auto_min_board_area_norm: 0.008
+  auto_pose_delta_threshold: 0.12
+  auto_primary_camera_strategy: first_camera
 
 calibration_sync:
   adaptive_enabled: true

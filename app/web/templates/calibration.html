@@ -14,14 +14,16 @@
   </div>
   <div class="inline">
     <input id="camera-ids" value="" placeholder="cam_x,cam_y">
-    <button id="cal-load-cameras">Use connected cameras</button>
-    <button id="cal-start">Start</button>
-    <button id="cal-capture" disabled>Capture</button>
-    <button id="cal-solve">Solve</button>
+    <button id="cal-load-cameras" type="button">Use connected cameras</button>
+    <button id="cal-start" type="button">Start</button>
+    <button id="cal-capture" type="button" disabled>Capture</button>
+    <button id="cal-auto-toggle" type="button">Auto Capture: Off</button>
+    <button id="cal-solve" type="button">Solve</button>
   </div>
   <div id="cal-readiness" class="wizard">
     <h3>Readiness</h3>
     <p id="cal-global" class="muted">No active calibration session.</p>
+    <p id="cal-auto-status" class="muted">Auto capture is off.</p>
     <div id="cal-cam-readiness"></div>
   </div>
   <div id="cal-score" class="wizard">
@@ -31,5 +33,5 @@
   </div>
   <pre id="cal-output">{{ report|tojson(indent=2) }}</pre>
 </article>
-<script src="/static/js/calibration.js"></script>
+<script src="/static/js/calibration.js?v=20260220b"></script>
 {% endblock %}

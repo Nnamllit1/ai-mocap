@@ -4,10 +4,17 @@
   const token = root.dataset.token;
   const output = document.getElementById("cal-output");
   const captureBtn = document.getElementById("cal-capture");
+  const autoToggleBtn = document.getElementById("cal-auto-toggle");
   const globalReadiness = document.getElementById("cal-global");
+  const autoStatus = document.getElementById("cal-auto-status");
   const camReadiness = document.getElementById("cal-cam-readiness");
   const scoreHead = document.getElementById("cal-score-head");
   const scoreTips = document.getElementById("cal-score-tips");
+  let autoEnabled = false;
+  let autoInFlight = false;
+  let lastAttemptTs = 0;
+  let autoPollMs = 400;
+  let latestReadiness = null;
 
   async function post(path, body) {
     const opts = {
@@ -37,10 +44,16 @@
   }
 
   function renderReadiness(data) {
+    latestReadiness = data;
     if (!data || !data.active) {
       globalReadiness.textContent = "No active calibration session.";
       camReadiness.innerHTML = "";
       captureBtn.disabled = true;
+      if (autoStatus) {
+        autoStatus.textContent = autoEnabled
+          ? "Auto capture is on. Waiting for an active session."
+          : "Auto capture is off.";
+      }
       return;
     }
     globalReadiness.innerHTML = `
@@ -50,6 +63,20 @@
       <span class="diag-pill">recommended fps: ${data.recommended_fps_cap ?? "n/a"}</span>
       <span class="diag-pill">captures: ${data.captures}/${data.required}</span>
     `;
+    const board = data.board_metrics || {};
+    const poseDelta = board.pose_delta == null ? "n/a" : Number(board.pose_delta).toFixed(3);
+    const stable = board.stable_ms == null ? "0" : Math.round(board.stable_ms);
+    const area = board.board_area_norm == null ? "n/a" : Number(board.board_area_norm).toFixed(4);
+    const reason = data.capture_block_reason || "ready";
+    if (autoStatus) {
+      autoStatus.innerHTML = `
+        <span class="diag-pill ${statusDot(Boolean(board.quality_ok))}">quality: ${Boolean(board.quality_ok)}</span>
+        <span class="diag-pill">pose delta: ${poseDelta}</span>
+        <span class="diag-pill">stable: ${stable} ms</span>
+        <span class="diag-pill">area: ${area}</span>
+        <span class="diag-pill">auto block: ${reason}</span>
+      `;
+    }
     const entries = Object.entries(data.per_camera || {});
     camReadiness.innerHTML = entries
       .map(([id, cam]) => {
@@ -65,7 +92,15 @@
         `;
       })
       .join("");
-    captureBtn.disabled = !data.all_cameras_ready;
+    const boardDetected = Object.values(data.per_camera || {}).every((cam) => Boolean(cam.checkerboard_detected));
+    captureBtn.disabled = !(data.all_cameras_ready && boardDetected);
+    if (autoEnabled && Number(data.captures || 0) >= Number(data.required || 0)) {
+      autoEnabled = false;
+      if (autoToggleBtn) autoToggleBtn.textContent = "Auto Capture: Off";
+      if (autoStatus) {
+        autoStatus.innerHTML += ' <span class="diag-pill">auto stopped: minimum captures reached</span>';
+      }
+    }
   }
 
   function extractScorePayload(data) {
@@ -120,6 +155,8 @@
       .filter(Boolean);
     const data = await post("/api/calibration/start", { camera_ids: ids });
     output.textContent = JSON.stringify(data, null, 2);
+    autoEnabled = false;
+    if (autoToggleBtn) autoToggleBtn.textContent = "Auto Capture: Off";
     await refreshReadiness();
     await refreshScore();
   });
@@ -135,10 +172,27 @@
   });
 
   captureBtn?.addEventListener("click", async () => {
-    const data = await post("/api/calibration/capture");
+    const data = await post("/api/calibration/capture", { mode: "manual" });
     output.textContent = JSON.stringify(data, null, 2);
     await refreshReadiness();
     await refreshScore();
+  });
+
+  autoToggleBtn?.addEventListener("click", () => {
+    autoEnabled = !autoEnabled;
+    autoToggleBtn.textContent = autoEnabled ? "Auto Capture: On" : "Auto Capture: Off";
+    if (autoStatus) {
+      autoStatus.textContent = autoEnabled
+        ? "Auto capture is on."
+        : "Auto capture is off.";
+    }
+    if (output) {
+      output.textContent = JSON.stringify(
+        { ok: true, event: "auto_toggle", enabled: autoEnabled, at_ms: Date.now() },
+        null,
+        2
+      );
+    }
   });
 
   document.getElementById("cal-solve")?.addEventListener("click", async () => {
@@ -154,7 +208,32 @@
     }
   });
 
-  setInterval(refreshReadiness, 900);
+  async function maybeAutoCapture() {
+    if (!autoEnabled || autoInFlight) return;
+    if (!latestReadiness || !latestReadiness.active) return;
+    const now = Date.now();
+    if (now - lastAttemptTs < autoPollMs) return;
+    autoInFlight = true;
+    lastAttemptTs = now;
+    try {
+      const data = await post("/api/calibration/capture", { mode: "auto" });
+      output.textContent = JSON.stringify(data, null, 2);
+      if (data?.ok === false && data?.rejection_reason) {
+        if (autoStatus) autoStatus.innerHTML = `<span class="diag-pill bad-pill">auto reject: ${data.rejection_reason}</span>`;
+      }
+    } catch (err) {
+      if (autoStatus) autoStatus.innerHTML = `<span class="diag-pill bad-pill">auto error: ${String(err.message || err)}</span>`;
+    } finally {
+      autoInFlight = false;
+      await refreshReadiness();
+      await refreshScore();
+    }
+  }
+
+  setInterval(async () => {
+    await refreshReadiness();
+    await maybeAutoCapture();
+  }, 900);
   refreshReadiness();
   refreshScore();
 })();

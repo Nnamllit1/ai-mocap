@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -8,6 +10,10 @@ class SessionActionResponse(BaseModel):
 
 class CalibrationStartRequest(BaseModel):
     camera_ids: list[str] = Field(default_factory=list)
+
+
+class CalibrationCaptureRequest(BaseModel):
+    mode: Literal["manual", "auto"] = "manual"
 
 
 class CreateInviteRequest(BaseModel):
