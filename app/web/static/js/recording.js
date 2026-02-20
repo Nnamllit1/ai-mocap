@@ -53,9 +53,9 @@
       const pb = points.find((p) => p.idx === b);
       if (!pa || !pb) continue;
       const ax = canvas.width * 0.5 + Number(pa.xyz[0]) * 100;
-      const ay = canvas.height * 0.7 - Number(pa.xyz[1]) * 100;
+      const ay = canvas.height * 0.7 + Number(pa.xyz[1]) * 100;
       const bx = canvas.width * 0.5 + Number(pb.xyz[0]) * 100;
-      const by = canvas.height * 0.7 - Number(pb.xyz[1]) * 100;
+      const by = canvas.height * 0.7 + Number(pb.xyz[1]) * 100;
       const held = pa.state === "held" || pb.state === "held";
       ctx.strokeStyle = held ? "#94a3b8" : confColor(Math.min(pa.conf ?? 0, pb.conf ?? 0));
       ctx.beginPath();
@@ -66,7 +66,7 @@
 
     for (const p of points) {
       const sx = canvas.width * 0.5 + Number(p.xyz[0]) * 100;
-      const sy = canvas.height * 0.7 - Number(p.xyz[1]) * 100;
+      const sy = canvas.height * 0.7 + Number(p.xyz[1]) * 100;
       ctx.fillStyle = p.state === "held" ? "#94a3b8" : confColor(p.conf);
       ctx.beginPath();
       ctx.arc(sx, sy, 4, 0, Math.PI * 2);

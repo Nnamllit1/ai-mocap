@@ -14,11 +14,17 @@ runtime:
   max_latency_ms: 120
   ema_alpha: 0.6
   show_preview: true
+  missing_joint_hold_ms: 250
+  max_joint_jump_m: 0.35
+  jump_reject_conf: 0.85
 
 triangulation:
   min_views: 2
   pair_conf_threshold: 0.25
   reproj_error_max: 25.0
+  allow_single_view_fallback: true
+  single_view_conf_scale: 0.55
+  single_view_max_age_ms: 800
 
 osc:
   host: 127.0.0.1
@@ -52,7 +58,6 @@ calibration:
   auto_stable_threshold_norm: 0.010
   auto_min_board_area_norm: 0.008
   auto_pose_delta_threshold: 0.12
-  auto_primary_camera_strategy: first_camera
 
 calibration_sync:
   adaptive_enabled: true

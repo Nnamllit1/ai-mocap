@@ -11,9 +11,15 @@
     <label>Target FPS <input id="runtime-fps" type="number" value="{{ config.runtime.target_fps }}"></label>
     <label>Latency (ms) <input id="runtime-latency" type="number" value="{{ config.runtime.max_latency_ms }}"></label>
     <label>EMA alpha <input id="runtime-ema" type="number" step="0.01" value="{{ config.runtime.ema_alpha }}"></label>
+    <label>Missing hold (ms) <input id="runtime-missing-hold" type="number" value="{{ config.runtime.missing_joint_hold_ms }}"></label>
+    <label>Max joint jump (m) <input id="runtime-max-jump" type="number" step="0.01" value="{{ config.runtime.max_joint_jump_m }}"></label>
+    <label>Jump reject conf <input id="runtime-jump-conf" type="number" step="0.01" value="{{ config.runtime.jump_reject_conf }}"></label>
     <label>Min views <input id="tri-min-views" type="number" value="{{ config.triangulation.min_views }}"></label>
     <label>Pair conf <input id="tri-conf" type="number" step="0.01" value="{{ config.triangulation.pair_conf_threshold }}"></label>
     <label>Reproj err max <input id="tri-reproj" type="number" step="0.1" value="{{ config.triangulation.reproj_error_max }}"></label>
+    <label>Allow 1-view fallback <input id="tri-single-fallback" type="checkbox" {% if config.triangulation.allow_single_view_fallback %}checked{% endif %}></label>
+    <label>1-view conf scale <input id="tri-single-scale" type="number" step="0.01" value="{{ config.triangulation.single_view_conf_scale }}"></label>
+    <label>1-view max age (ms) <input id="tri-single-age" type="number" value="{{ config.triangulation.single_view_max_age_ms }}"></label>
     <label>OSC host <input id="osc-host" value="{{ config.osc.host }}"></label>
     <label>OSC port <input id="osc-port" type="number" value="{{ config.osc.port }}"></label>
   </div>

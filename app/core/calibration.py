@@ -264,6 +264,18 @@ class CalibrationService:
             "area": area / frame_area,
         }
 
+    def _aggregate_pose_metrics(self, poses_by_cam: Dict[str, Dict[str, float]]) -> Dict[str, float] | None:
+        if not poses_by_cam:
+            return None
+        cx_vals = [float(p["cx"]) for p in poses_by_cam.values()]
+        cy_vals = [float(p["cy"]) for p in poses_by_cam.values()]
+        area_vals = [float(p["area"]) for p in poses_by_cam.values()]
+        return {
+            "cx": float(np.median(cx_vals)),
+            "cy": float(np.median(cy_vals)),
+            "area": float(np.median(area_vals)),
+        }
+
     def _pose_distance(self, current: Dict[str, float] | None, previous: Dict[str, float] | None) -> float | None:
         if not current or not previous:
             return None
@@ -329,6 +341,8 @@ class CalibrationService:
                     "quality_ok": False,
                     "pose_delta": None,
                     "stable_ms": 0.0,
+                    "board_area_norm_by_camera": {},
+                    "board_quality_ok_by_camera": {},
                 },
                 "capture_block_reason": "session_inactive",
             }
@@ -347,13 +361,26 @@ class CalibrationService:
             if frame_packet is not None
         }
         detect_results = self._detect_many(frames_to_detect, board_size)
+        min_area_norm = float(self.cfg.calibration.auto_min_board_area_norm)
+        poses_by_cam: Dict[str, Dict[str, float]] = {}
         for cid in camera_ids:
             frame_packet = latest_frames.get(cid)
             checkerboard_detected = False
+            pose = None
             if frame_packet is not None:
-                found, _ = detect_results.get(cid, (False, None))
-                checkerboard_detected = bool(found)
+                found, corners = detect_results.get(cid, (False, None))
+                checkerboard_detected = bool(found and corners is not None)
+                if checkerboard_detected:
+                    pose = self._extract_pose_metrics(corners, frame_packet.frame.shape)
+                    poses_by_cam[cid] = pose
             per_camera[cid]["checkerboard_detected"] = checkerboard_detected
+            per_camera[cid]["board_area_norm"] = None if pose is None else float(pose["area"])
+            per_camera[cid]["board_centroid_xy_norm"] = (
+                None if pose is None else [float(pose["cx"]), float(pose["cy"])]
+            )
+            per_camera[cid]["board_quality_ok"] = bool(
+                pose is not None and float(pose["area"]) >= min_area_norm
+            )
 
         all_ready = all(
             per_camera[cid]["connected"]
@@ -362,30 +389,31 @@ class CalibrationService:
             for cid in camera_ids
         )
         now_ms = time.time() * 1000.0
-        primary_camera_id = camera_ids[0] if camera_ids else None
-        primary_pose = None
-        if primary_camera_id:
-            frame_packet = latest_frames.get(primary_camera_id)
-            found, corners = detect_results.get(primary_camera_id, (False, None))
-            if frame_packet is not None and found and corners is not None:
-                primary_pose = self._extract_pose_metrics(corners, frame_packet.frame.shape)
-
-        stable_ms = self._update_stability(primary_pose, now_ms)
-        pose_delta = self._pose_distance(primary_pose, self.session.last_accept_pose)
-        board_area = float(primary_pose["area"]) if primary_pose else None
+        aggregate_pose = self._aggregate_pose_metrics(poses_by_cam)
+        stable_ms = self._update_stability(aggregate_pose, now_ms)
+        pose_delta = self._pose_distance(aggregate_pose, self.session.last_accept_pose)
+        board_area = float(aggregate_pose["area"]) if aggregate_pose else None
         quality_ok = bool(
-            primary_pose is not None
-            and board_area is not None
-            and board_area >= float(self.cfg.calibration.auto_min_board_area_norm)
+            camera_ids
+            and all(
+                bool(per_camera[cid]["checkerboard_detected"] and per_camera[cid]["board_quality_ok"])
+                for cid in camera_ids
+            )
         )
         board_metrics = {
             "centroid_xy_norm": None
-            if primary_pose is None
-            else [float(primary_pose["cx"]), float(primary_pose["cy"])],
+            if aggregate_pose is None
+            else [float(aggregate_pose["cx"]), float(aggregate_pose["cy"])],
             "board_area_norm": board_area,
             "quality_ok": quality_ok,
             "pose_delta": pose_delta,
             "stable_ms": stable_ms,
+            "board_area_norm_by_camera": {
+                cid: per_camera[cid]["board_area_norm"] for cid in camera_ids
+            },
+            "board_quality_ok_by_camera": {
+                cid: bool(per_camera[cid]["board_quality_ok"]) for cid in camera_ids
+            },
         }
         readiness_metrics = {
             "all_cameras_ready": all_ready,
@@ -455,10 +483,15 @@ class CalibrationService:
             board_size,
         )
         per_camera = frame_diag["per_camera"]
+        min_area_norm = float(self.cfg.calibration.auto_min_board_area_norm)
+        poses_by_cam: Dict[str, Dict[str, float]] = {}
         for cid in self.session.camera_ids:
             frame = frames[cid].frame
             found, corners = detect_results.get(cid, (False, None))
             per_camera[cid]["checkerboard_detected"] = bool(found and corners is not None)
+            per_camera[cid]["board_area_norm"] = None
+            per_camera[cid]["board_centroid_xy_norm"] = None
+            per_camera[cid]["board_quality_ok"] = False
             if not found or corners is None:
                 self.session.failure_streak = 0
                 return {
@@ -474,28 +507,38 @@ class CalibrationService:
                 }
             corners_by_cam[cid] = corners.astype(np.float32)
             self.session.image_sizes[cid] = (frame.shape[1], frame.shape[0])
+            pose = self._extract_pose_metrics(corners_by_cam[cid], frame.shape)
+            poses_by_cam[cid] = pose
+            per_camera[cid]["board_area_norm"] = float(pose["area"])
+            per_camera[cid]["board_centroid_xy_norm"] = [float(pose["cx"]), float(pose["cy"])]
+            per_camera[cid]["board_quality_ok"] = bool(float(pose["area"]) >= min_area_norm)
 
         now_ms = time.time() * 1000.0
-        primary_camera_id = self.session.camera_ids[0] if self.session.camera_ids else None
-        primary_pose = None
-        if primary_camera_id is not None:
-            primary_pose = self._extract_pose_metrics(corners_by_cam[primary_camera_id], frames[primary_camera_id].frame.shape)
-        stable_ms = self._update_stability(primary_pose, now_ms)
-        pose_delta = self._pose_distance(primary_pose, self.session.last_accept_pose)
-        board_area = float(primary_pose["area"]) if primary_pose else None
+        aggregate_pose = self._aggregate_pose_metrics(poses_by_cam)
+        stable_ms = self._update_stability(aggregate_pose, now_ms)
+        pose_delta = self._pose_distance(aggregate_pose, self.session.last_accept_pose)
+        board_area = float(aggregate_pose["area"]) if aggregate_pose else None
         quality_ok = bool(
-            primary_pose is not None
-            and board_area is not None
-            and board_area >= float(self.cfg.calibration.auto_min_board_area_norm)
+            self.session.camera_ids
+            and all(
+                bool(per_camera[cid]["checkerboard_detected"] and per_camera[cid]["board_quality_ok"])
+                for cid in self.session.camera_ids
+            )
         )
         board_metrics = {
             "centroid_xy_norm": None
-            if primary_pose is None
-            else [float(primary_pose["cx"]), float(primary_pose["cy"])],
+            if aggregate_pose is None
+            else [float(aggregate_pose["cx"]), float(aggregate_pose["cy"])],
             "board_area_norm": board_area,
             "quality_ok": quality_ok,
             "pose_delta": pose_delta,
             "stable_ms": stable_ms,
+            "board_area_norm_by_camera": {
+                cid: per_camera[cid]["board_area_norm"] for cid in self.session.camera_ids
+            },
+            "board_quality_ok_by_camera": {
+                cid: bool(per_camera[cid]["board_quality_ok"]) for cid in self.session.camera_ids
+            },
         }
         readiness_metrics = {
             "all_cameras_ready": True,
@@ -531,7 +574,7 @@ class CalibrationService:
         self.session.captures += 1
         self.session.failure_streak = 0
         self.session.last_accept_ts_ms = now_ms
-        self.session.last_accept_pose = None if primary_pose is None else dict(primary_pose)
+        self.session.last_accept_pose = None if aggregate_pose is None else dict(aggregate_pose)
         return {
             "ok": True,
             "accepted": True,
@@ -573,11 +616,11 @@ class CalibrationService:
             store.intrinsics[cid] = (k_mat, dist)
             rms_by_camera[cid] = float(rms)
 
-        ref_id = camera_ids[0]
+        ref_id = sorted(camera_ids)[0]
         store.extrinsics[ref_id] = (np.eye(3, dtype=np.float64), np.zeros((3, 1), dtype=np.float64))
 
         pair_rms = {}
-        for cid in camera_ids[1:]:
+        for cid in sorted(cid for cid in camera_ids if cid != ref_id):
             k1, d1 = store.intrinsics[ref_id]
             k2, d2 = store.intrinsics[cid]
             rms, _, _, _, _, r_mat, t_vec, _, _ = cv2.stereoCalibrate(

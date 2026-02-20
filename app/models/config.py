@@ -25,12 +25,17 @@ class RuntimeConfig(BaseModel):
     ema_alpha: float = 0.6
     show_preview: bool = True
     missing_joint_hold_ms: int = 250
+    max_joint_jump_m: float = 0.35
+    jump_reject_conf: float = 0.85
 
 
 class TriangulationConfig(BaseModel):
     min_views: int = 2
     pair_conf_threshold: float = 0.25
     reproj_error_max: float = 25.0
+    allow_single_view_fallback: bool = True
+    single_view_conf_scale: float = 0.55
+    single_view_max_age_ms: int = 800
 
 
 class OscConfig(BaseModel):
@@ -68,7 +73,6 @@ class CalibrationConfig(BaseModel):
     auto_stable_threshold_norm: float = 0.010
     auto_min_board_area_norm: float = 0.008
     auto_pose_delta_threshold: float = 0.12
-    auto_primary_camera_strategy: str = "first_camera"
 
     @field_validator("chessboard")
     @classmethod

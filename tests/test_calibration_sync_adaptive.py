@@ -127,6 +127,30 @@ class CalibrationAdaptiveSyncTests(unittest.TestCase):
         self.assertEqual(out["capture_mode"], "auto")
         self.assertEqual(out["rejection_reason"], "min_interval")
 
+    def test_readiness_quality_uses_all_cameras(self):
+        service, _ = self._ready_service()
+        corners_big = self._make_corners(40, 40, step=2.0)
+        corners_small = self._make_corners(2, 2, step=0.2)
+        service._detect_many = lambda frames_by_cam, board_size: {
+            "cam_a": (True, corners_big),
+            "cam_b": (True, corners_small),
+        }
+
+        readiness = service.readiness()
+        self.assertTrue(readiness["all_cameras_ready"])
+        self.assertFalse(readiness["board_metrics"]["quality_ok"])
+        self.assertIn("board_quality_ok_by_camera", readiness["board_metrics"])
+        self.assertTrue(readiness["board_metrics"]["board_quality_ok_by_camera"]["cam_a"])
+        self.assertFalse(readiness["board_metrics"]["board_quality_ok_by_camera"]["cam_b"])
+
+    def test_aggregate_pose_metrics_is_order_independent(self):
+        service = CalibrationService(self._cfg(), CaptureHub(heartbeat_timeout_s=6.0))
+        pose_a = {"cx": 0.2, "cy": 0.3, "area": 0.02}
+        pose_b = {"cx": 0.6, "cy": 0.7, "area": 0.04}
+        agg1 = service._aggregate_pose_metrics({"cam_a": pose_a, "cam_b": pose_b})
+        agg2 = service._aggregate_pose_metrics({"cam_b": pose_b, "cam_a": pose_a})
+        self.assertEqual(agg1, agg2)
+
 
 if __name__ == "__main__":
     unittest.main()

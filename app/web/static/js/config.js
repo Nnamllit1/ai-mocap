@@ -10,6 +10,9 @@
   function txt(id) {
     return document.getElementById(id).value;
   }
+  function checked(id) {
+    return Boolean(document.getElementById(id)?.checked);
+  }
 
   document.getElementById("config-save")?.addEventListener("click", async () => {
     const payload = {
@@ -23,11 +26,17 @@
         target_fps: num("runtime-fps"),
         max_latency_ms: num("runtime-latency"),
         ema_alpha: num("runtime-ema"),
+        missing_joint_hold_ms: num("runtime-missing-hold"),
+        max_joint_jump_m: num("runtime-max-jump"),
+        jump_reject_conf: num("runtime-jump-conf"),
       },
       triangulation: {
         min_views: num("tri-min-views"),
         pair_conf_threshold: num("tri-conf"),
         reproj_error_max: num("tri-reproj"),
+        allow_single_view_fallback: checked("tri-single-fallback"),
+        single_view_conf_scale: num("tri-single-scale"),
+        single_view_max_age_ms: num("tri-single-age"),
       },
       osc: {
         host: txt("osc-host"),

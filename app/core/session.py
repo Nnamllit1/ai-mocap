@@ -129,12 +129,18 @@ class SessionManager:
             triangulator = TriangulationEngine(calibration, self.cfg.triangulation)
             estimator = PoseEstimator(self.cfg.model)
             smoother = JointSmoother(self.cfg.runtime.ema_alpha)
-            state_tracker = JointStateTracker(self.cfg.runtime.missing_joint_hold_ms)
+            state_tracker = JointStateTracker(
+                self.cfg.runtime.missing_joint_hold_ms,
+                self.cfg.runtime.max_joint_jump_m,
+                self.cfg.runtime.jump_reject_conf,
+            )
             osc_sink = BlenderOscSink(self.cfg.osc)
             exporter = ExportManager(self.cfg.export)
             target_dt = 1.0 / max(self.cfg.runtime.target_fps, 1)
             self.state.message = "running"
             prev_cycle_end = time.time()
+            prior_pose3d: Dict[int, np.ndarray] = {}
+            prior_timestamps: Dict[int, float] = {}
 
             while not self._stop_evt.is_set():
                 t0 = time.time()
@@ -157,21 +163,43 @@ class SessionManager:
 
                 pose3d = {}
                 joint_confidences: Dict[int, float] = {}
+                measured_states: Dict[int, str] = {}
                 timestamp = max(frame.timestamp for frame in frames.values())
                 for joint_idx in range(len(COCO_JOINTS)):
                     obs = {}
                     for source_id, joints in joints_by_source.items():
                         if joint_idx in joints:
                             obs[source_id] = joints[joint_idx]
-                    xyz = triangulator.triangulate_joint(obs)
-                    if xyz is None:
+                    estimate = triangulator.estimate_joint(
+                        obs,
+                        prior_xyz=prior_pose3d.get(joint_idx),
+                        prior_timestamp=prior_timestamps.get(joint_idx),
+                        timestamp=timestamp,
+                    )
+                    if estimate is None:
                         continue
+                    xyz = estimate.xyz
                     xyz = smoother.update(joint_idx, xyz)
                     pose3d[joint_idx] = xyz
-                    conf = float(np.mean([item[2] for item in obs.values()])) if obs else 0.0
+                    inlier_confidences = [
+                        obs[cid][2]
+                        for cid in estimate.inlier_camera_ids
+                        if cid in obs
+                    ]
+                    if not inlier_confidences:
+                        inlier_confidences = [item[2] for item in obs.values()]
+                    conf = float(np.mean(inlier_confidences)) if inlier_confidences else 0.0
+                    if estimate.mode == "single_view":
+                        conf *= float(self.cfg.triangulation.single_view_conf_scale)
                     joint_confidences[joint_idx] = conf
+                    measured_states[joint_idx] = estimate.mode
 
-                joint_states = state_tracker.stabilize(timestamp, pose3d, joint_confidences)
+                joint_states = state_tracker.stabilize(
+                    timestamp,
+                    pose3d,
+                    joint_confidences,
+                    measured_states=measured_states,
+                )
                 stable_pose3d = {
                     idx: np.array(entry["xyz"], dtype=float)
                     for idx, entry in joint_states.items()
@@ -179,6 +207,11 @@ class SessionManager:
                 stable_confidences = {
                     idx: float(entry["confidence"]) for idx, entry in joint_states.items()
                 }
+                for idx, entry in joint_states.items():
+                    state = str(entry.get("state", ""))
+                    if state in {"measured", "single_view"}:
+                        prior_pose3d[idx] = np.array(entry["xyz"], dtype=float)
+                        prior_timestamps[idx] = timestamp
 
                 self._emit_joints_to_sinks(osc_sink, stable_pose3d, stable_confidences, timestamp)
                 self._emit_status_to_sinks(

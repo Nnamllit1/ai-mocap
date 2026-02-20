@@ -36,6 +36,8 @@ class CalibrationReadinessApiTests(unittest.TestCase):
         self.assertIn("quality_ok", payload["board_metrics"])
         self.assertIn("pose_delta", payload["board_metrics"])
         self.assertIn("stable_ms", payload["board_metrics"])
+        self.assertIn("board_area_norm_by_camera", payload["board_metrics"])
+        self.assertIn("board_quality_ok_by_camera", payload["board_metrics"])
 
     def test_capture_endpoint_accepts_default_and_manual_mode_payload(self):
         app = create_app()
