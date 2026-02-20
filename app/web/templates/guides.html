@@ -40,5 +40,15 @@
       <li class="wizard-step">If phone camera access fails on HTTP, follow the browser wizard shown on <code>/join</code>.</li>
     </ul>
   </section>
+
+  <section class="wizard">
+    <h3>Blender Live Sync</h3>
+    <ol class="wizard-steps">
+      <li class="wizard-step">Install add-on file <code>integrations/blender/mocap_live_sync_addon.py</code> in Blender 3.6+.</li>
+      <li class="wizard-step">Set runtime <code>osc.host</code>, <code>osc.port</code>, and <code>osc.address_prefix</code> to match Blender add-on settings.</li>
+      <li class="wizard-step">In Blender panel <code>View3D &gt; Sidebar &gt; Mocap Live</code>, click <strong>Create Skeleton</strong> then <strong>Start Sync</strong>.</li>
+      <li class="wizard-step">See full instructions in <code>docs/guides/blender_live_sync.md</code>.</li>
+    </ol>
+  </section>
 </article>
 {% endblock %}

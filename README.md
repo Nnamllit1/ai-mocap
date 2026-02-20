@@ -13,6 +13,16 @@
 - In-app page: `/guides`
 - Setup guide doc: `docs/guides/setup.md`
 - Calibration guide doc: `docs/guides/calibration.md`
+- Blender live sync guide doc: `docs/guides/blender_live_sync.md`
+
+## Blender Live Sync
+1. Install add-on file in Blender:
+   - `integrations/blender/mocap_live_sync_addon.py`
+2. Set server OSC target in `configs/default.yaml`:
+   - `osc.host` = Blender machine IP (or `127.0.0.1` on same machine)
+   - `osc.port` = add-on listen port (default `9000`)
+   - `osc.address_prefix` = add-on OSC prefix (default `/mocap`)
+3. In Blender (`View3D > Sidebar > Mocap Live`), click `Create Skeleton`, then `Start Sync`.
 
 ## Main Pages
 - `/` Dashboard: invites, session start/stop, checkerboard download.
