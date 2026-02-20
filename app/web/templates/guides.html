@@ -7,14 +7,13 @@
   <section class="wizard">
     <h3>Setup Guide</h3>
     <ol class="wizard-steps">
-      <li class="wizard-step">Install Python dependencies from <code>requirements.txt</code>.</li>
-      <li class="wizard-step">Set server token and base settings in <code>configs/default.yaml</code>. (The default is <code>1234</code>)</li>
-      <li class="wizard-step">Start the server with <code>scripts/run_dev.ps1</code>.</li>
-      <li class="wizard-step">Open <code>/login</code> and authenticate with your token.</li>
-      <li class="wizard-step">Create a camera invite from Dashboard and open the join URL on each phone.</li>
-      <li class="wizard-step">On phone join page, grant camera access and press <strong>Join + Stream</strong>.</li>
-      <li class="wizard-step">Verify camera status in <code>/cameras</code> shows connected.</li>
-      <li class="wizard-step">Start session from Dashboard and verify activity in <code>/preview</code> and <code>/recording</code>.</li>
+      <li class="wizard-step"><strong>Need this first:</strong> PC + phone(s) on same Wi-Fi, Python installed, and access to <code>configs/default.yaml</code>.</li>
+      <li class="wizard-step">Install dependencies from <code>requirements.txt</code> and check your Portal token in <code>configs/default.yaml</code> (default <code>1234</code>).</li>
+      <li class="wizard-step">Start the server with <code>scripts/run_dev.ps1</code>, then open <code>/login</code>. You should see the <strong>Portal Token</strong> form.</li>
+      <li class="wizard-step">Log in and open Dashboard. Create camera invite(s), open each link on phone, and tap <strong>Join + Stream</strong>.</li>
+      <li class="wizard-step">Open <code>/cameras</code>. You should see your phone camera(s) as connected.</li>
+      <li class="wizard-step">Start session and open <code>/preview</code>. You should see active cameras and moving joints.</li>
+      <li class="wizard-step"><strong>If stuck:</strong> use detailed setup + troubleshooting in <code>docs/guides/setup.md</code>.</li>
     </ol>
   </section>
 

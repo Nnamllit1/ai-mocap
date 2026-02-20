@@ -1,13 +1,22 @@
 # Mocap Web Portal
 
 ## Quickstart
+Prerequisites:
+- Windows PC and phone(s) on the same Wi-Fi
+- Python installed
+
 1. Install dependencies:
    - `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`
-2. Configure token/settings in `configs/default.yaml`.
-3. Start:
+2. Check Portal token in `configs/default.yaml`:
+   - default is `server.token: "1234"` (change it for non-local use)
+3. Start server:
    - `.\scripts\run_dev.ps1`
-4. Open login:
-   - `http://<host>:8000/login`
+4. Open login page on the PC:
+   - `http://localhost:8000/login`
+5. Log in, create invite(s), and press `Join + Stream` on phone(s).
+6. Verify `/cameras` shows `connected`, then open `/preview` for live joints.
+
+For full beginner setup and troubleshooting, see `docs/guides/setup.md`.
 
 ## Guides
 - In-app page: `/guides`
@@ -16,6 +25,8 @@
 - Blender live sync guide doc: `docs/guides/blender_live_sync.md`
 
 ## Blender Live Sync
+Complete base setup first (`docs/guides/setup.md`), then connect Blender.
+
 1. Install add-on file in Blender:
    - `integrations/blender/mocap_live_sync_addon.py`
 2. Set server OSC target in `configs/default.yaml`:
